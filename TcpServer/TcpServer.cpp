@@ -21,6 +21,12 @@ int TcpServer::SocketSetup(){
         return -1;
     }
 
+    int optval = 1;
+    if (setsockopt(sSocket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) < 0) {
+        std::cerr << "Error setting up socket options" << std::endl;
+        return -1;    
+    }
+
     if (bind(sSocket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         std::cerr << "Error binding up socket" << std::endl;
         return -1;

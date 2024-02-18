@@ -50,5 +50,6 @@ void Logger::runLogger() {
 
 Logger::~Logger(){
     isRunning = false;
-    logThread.join();
+    if(logThread.joinable())
+        logThread.join();
 }

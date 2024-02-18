@@ -5,7 +5,8 @@ PigeonServer::PigeonServer(const std::string& certPath, const std::string& keyPa
     TcpServer(certPath,keyPath,port), serverName(serverName)
 {
     std::cout << "Setting up tcp server" << std::endl;
-    
+    std::cout << this->certPath << " - " << this->privateKey << std::endl;
+
     if(TcpServer::Setup() != 0){
         throw std::string("[ERROR] PigeonServer::PigeonServer Error while setting up tcp server");
     }
@@ -13,15 +14,34 @@ PigeonServer::PigeonServer(const std::string& certPath, const std::string& keyPa
     this->logger = new Logger();
 };
 
-void PigeonServer::Run() {
-    signal(SIGPIPE, SIG_IGN);
-    std::vector<std::thread> clientThreads;
 
-   
+
+void PigeonServer::Run(bool& shouldDelete) {
+    signal(SIGPIPE, SIG_IGN);
+
         while (1)
         {
-            sockaddr_in clientAddr;
+            
+        sockaddr_in clientAddr;
         unsigned int len = sizeof(sockaddr_in);
+
+        struct timeval timeout;
+        timeout.tv_sec = 1; 
+        timeout.tv_usec = 0;
+
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(sSocket, &readfds);
+
+        int result = select(sSocket + 1, &readfds, nullptr, nullptr, &timeout);
+        if (result < 0) {
+            break;
+        } else if (result == 0) {
+            std::cout << shouldDelete << std::endl;
+            if(shouldDelete)
+                break;
+            continue;
+        }
 
         int client = accept(sSocket, (struct sockaddr*)&addr, &len);
 
@@ -46,17 +66,21 @@ void PigeonServer::Run() {
                 client1.clientSsl = ssl;
                 auto latestClientIter = this->clients.insert({client,client1});
 
-                std::thread([latestClientIter, this]{
+                /*std::thread([latestClientIter, this]{
                     logger->log(INFO, " NEW THREAD FOR CLIENT FD: " + std::to_string(latestClientIter.first->first));
                     while (1)
                     {   
                         auto a = ReadPacket(latestClientIter.first->second.clientSsl);
-                        logger->log(DEBUG, "PACKET RECV FROM FD: " + std::to_string(latestClientIter.first->first) + " SIZE: " + std::to_string(a.size()) + " BYTES");
+                        //logger->log(DEBUG, "PACKET RECV FROM FD: " + std::to_string(latestClientIter.first->first) + " SIZE: " + std::to_string(a.size()) + " BYTES");
 
                         if(a.empty()){
-                            logger->log(INFO, "ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));
-                            FreeClient(latestClientIter);
-                            logger->log(INFO, "AMOUNT OF CLIENTS: " + std::to_string(clients.size()));
+                            //logger->log(INFO, "ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));
+                            
+                            int key = latestClientIter.first->first;
+                            Client client = latestClientIter.first->second;                                               
+
+                            this->FreeClient(key,client.clientSsl);
+                            //logger->log(INFO, "AMOUNT OF CLIENTS: " + std::to_string(clients.size()));
                             break;
                         }
 
@@ -69,7 +93,7 @@ void PigeonServer::Run() {
                         BroadcastPacket(pkt);
 
                     }
-                }).detach();
+                }).detach();*/
                 
                 
             }
@@ -172,9 +196,4 @@ void* PigeonServer::BroadcastPacket(const PigeonPacket& packet){
     return nullptr;
 }
 
-void PigeonServer::FreeClient(const std::pair<std::unordered_map<int, Client>::iterator, bool>& iter){
-   SSL_shutdown(iter.first->second.clientSsl);
-    SSL_free(iter.first->second.clientSsl);
-    close(iter.first->first);
-    clients.erase(iter.first);
-}
+

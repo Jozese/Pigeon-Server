@@ -51,9 +51,16 @@ class PigeonServer: public TcpServer{
 
 public:
     PigeonServer(const std::string& certPath, const std::string& keyPath, const std::string& serverName, unsigned short port);
-
+    ~PigeonServer(){
+        for(auto& p : clients){
+            std::cout << "FREEING CLIENT " << std::to_string(p.first) << std::endl;
+            this->FreeClient(p.first,p.second.clientSsl);
+            std::cout << "FREED " << std::endl;
+        }
+        std::cout << "DELETED" << std::endl;
+    };
 public:
-    void Run();
+    void Run(bool&  shouldDelete);
     
     std::vector<unsigned char> ReadPacket(SSL* ssl1);
     int ProcessPacket();
@@ -65,7 +72,10 @@ public:
 
     void* BroadcastPacket(const PigeonPacket& packet);
 
-    void FreeClient(const std::pair<std::unordered_map<int, Client>::iterator, bool>& iter);
+    void FreeClient(int c, SSL* cSSL){
+        SSL_shutdown(cSSL);
+        close(c);
+    };
 
 private:
     std::string serverName = "";

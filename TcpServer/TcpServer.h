@@ -33,6 +33,26 @@ public:
     int SendAll(std::vector<unsigned char>& buf, SSL* ssl);
 public:
     inline int GetSocketFD(){ return sSocket;};
+
+    ~TcpServer() {
+        if (ssl != nullptr) {
+            SSL_free(ssl);
+            ssl = nullptr;
+        }
+
+        if (sslCtx != nullptr) {
+            SSL_CTX_free(sslCtx);
+            sslCtx = nullptr;
+        }
+
+        if (sSocket != -1) {
+            close(sSocket);
+            sSocket = -1;
+        }
+
+        std::cout << "DELETED2" << std::endl;
+    }
+
 protected:
     int sSocket = -1;
 
