@@ -4,6 +4,8 @@
 PigeonServer::PigeonServer(const std::string& certPath, const std::string& keyPath, const std::string& serverName, unsigned short port):
     TcpServer(certPath,keyPath,port), serverName(serverName)
 {
+    clients = new std::unordered_map<int,Client>();
+
     std::cout << "Setting up tcp server" << std::endl;
     std::cout << this->certPath << " - " << this->privateKey << std::endl;
 
@@ -64,9 +66,9 @@ void PigeonServer::Run(bool& shouldDelete) {
                 logger->log(INFO, " OK SSL/TLS HANDSHAKE");
                 Client client1;
                 client1.clientSsl = ssl;
-                auto latestClientIter = this->clients.insert({client,client1});
+                auto latestClientIter = clients->insert({client,client1});
 
-                /*std::thread([latestClientIter, this]{
+                std::thread([latestClientIter, this]{
                     logger->log(INFO, " NEW THREAD FOR CLIENT FD: " + std::to_string(latestClientIter.first->first));
                     while (1)
                     {   
@@ -79,7 +81,8 @@ void PigeonServer::Run(bool& shouldDelete) {
                             int key = latestClientIter.first->first;
                             Client client = latestClientIter.first->second;                                               
 
-                            this->FreeClient(key,client.clientSsl);
+                            //posible race condition con destructor pero me da igual
+                            this->FreeClient(key,client.clientSsl);                            
                             //logger->log(INFO, "AMOUNT OF CLIENTS: " + std::to_string(clients.size()));
                             break;
                         }
@@ -93,7 +96,7 @@ void PigeonServer::Run(bool& shouldDelete) {
                         BroadcastPacket(pkt);
 
                     }
-                }).detach();*/
+                }).detach();
                 
                 
             }
@@ -186,7 +189,7 @@ void* PigeonServer::BroadcastPacket(const PigeonPacket& packet){
     int sent = -1;
     std::string clientsStr = "";
     if(!packetToSend.empty()){
-        for(auto& c : clients){
+        for(auto& c : *clients){
             clientsStr += std::to_string(c.first) + " ";
             sent = SendAll(packetToSend, c.second.clientSsl);
 

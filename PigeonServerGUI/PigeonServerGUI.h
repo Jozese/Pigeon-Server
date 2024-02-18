@@ -8,6 +8,8 @@
 #include "../ImGui/imgui_stdlib.h"
 #include <GL/glew.h>
 #include <chrono>
+#include <unistd.h>
+#include <sys/resource.h>
 #include <vector>
 
 #include "../PigeonServer.h"
@@ -88,27 +90,36 @@ namespace PigeonServerGUI{
     }
 
     void PlotFps(){
-        /*
-        ImGui::BeginChild("FPS",ImVec2(600, 40));
+    
+        struct rusage usage;
         static double t = 0;
 
         static ScrollingBuffer buffer;
-        buffer.AddPoint(t, ImGui::GetIO().Framerate);
+        static ScrollingBuffer bufferMem;
+
         t += ImGui::GetIO().DeltaTime;
-    
+
+        float memory_usage_gb = -1;
+        if (getrusage(RUSAGE_SELF, &usage) == 0) {
+            memory_usage_gb = static_cast<float>(usage.ru_maxrss) / (1024);
+        }
+
+        buffer.AddPoint(t, ImGui::GetIO().Framerate);
+        bufferMem.AddPoint(t,memory_usage_gb);
 
         // Begin plot
-        if (ImPlot::BeginPlot("Framerate",ImVec2(-1,150))) {
+        if (ImPlot::BeginPlot("Framerate",ImVec2(-1,175))) {
             ImPlot::SetupAxisLimits(ImAxis_X1,t-30, t, ImGuiCond_Always);
             ImPlot::SetupAxisLimits(ImAxis_Y1,30,90);
+
             ImPlot::PlotLine("FPS", &buffer.Data[0].x, &buffer.Data[0].y, buffer.Data.size(), 0, buffer.Offset, 2 * sizeof(float));
+            ImPlot::PlotLine("RSS", &bufferMem.Data[0].x, &bufferMem.Data[0].y, bufferMem.Data.size(), 0, bufferMem.Offset, 2 * sizeof(float));
 
             // End plot
             ImPlot::EndPlot();
         }
         
-        ImGui::EndChild();
-        */
+        
     }
 
     void ServerCreation(){
@@ -171,6 +182,11 @@ namespace PigeonServerGUI{
             status = "Server is running!";
         }
             ImGui::TextColored(color,status.c_str());
+        if(server!=nullptr){
+            ImGui::BulletText("Clients connected: ");
+            ImGui::SameLine();
+            ImGui::Text((std::to_string((server->GetClients()->size()))).c_str());
+        }
     }   
 
     void SetUpStyle(){
@@ -310,7 +326,7 @@ namespace PigeonServerGUI{
     void RenderTabBar(){
         ImGui::BeginChild("srv creation",ImVec2(320, 220),true);
 
-            PigeonServerGUI::ServerCreation();
+            ServerCreation();
 
         ImGui::EndChild();
 
@@ -318,17 +334,18 @@ namespace PigeonServerGUI{
 
         ImGui::BeginChild("serv info",ImVec2(250, 220),true);
 
-            PigeonServerGUI::ServerInformation();
+            ServerInformation();
 
         ImGui::EndChild();
 
         ImGui::SameLine();
 
         ImGui::BeginChild("FPSw",ImVec2(635, 220),true);
+            PlotFps();
         ImGui::EndChild();
 
 
-        ImGui::BeginChild("serv log",ImVec2(565, 425),true);
+        ImGui::BeginChild("serv log",ImVec2(585, 425),true);
         ImGui::EndChild();
 
         ImGui::SameLine();

@@ -52,11 +52,13 @@ class PigeonServer: public TcpServer{
 public:
     PigeonServer(const std::string& certPath, const std::string& keyPath, const std::string& serverName, unsigned short port);
     ~PigeonServer(){
-        for(auto& p : clients){
+        for(auto& p : *clients){
             std::cout << "FREEING CLIENT " << std::to_string(p.first) << std::endl;
-            this->FreeClient(p.first,p.second.clientSsl);
+                SSL_shutdown(p.second.clientSsl);
+                close(p.first);
             std::cout << "FREED " << std::endl;
         }
+        delete clients;
         std::cout << "DELETED" << std::endl;
     };
 public:
@@ -75,7 +77,13 @@ public:
     void FreeClient(int c, SSL* cSSL){
         SSL_shutdown(cSSL);
         close(c);
+        clients->erase(c);
     };
+
+public:
+    inline std::unordered_map<int,Client>* GetClients(){
+        return this->clients;
+    }
 
 private:
     std::string serverName = "";
@@ -83,6 +91,6 @@ private:
     bool isLocked = false;
 
 private:
-    std::unordered_map<int,Client> clients;
+    std::unordered_map<int,Client>* clients;
     Logger* logger = nullptr;
 };
