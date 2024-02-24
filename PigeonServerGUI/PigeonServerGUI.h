@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../PigeonServer.h"
+
 #include <iostream>
 #include <SDL2/SDL.h>
 #include "../ImGui/imgui_impl_sdl2.h"
@@ -8,12 +10,14 @@
 #include "../ImGui/imgui_stdlib.h"
 #include <GL/glew.h>
 #include <chrono>
+#include <ctime>
 #include <unistd.h>
 #include <sys/resource.h>
 #include <vector>
+#include <thread>
 
-#include "../PigeonServer.h"
 
+//Took it from https://github.com/epezent/implot/blob/master/implot_demo.cpp
 struct ScrollingBuffer {
     int MaxSize;
     int Offset;
@@ -39,21 +43,7 @@ struct ScrollingBuffer {
     }
 };
 
-// utility structure for realtime plot
-struct RollingBuffer {
-    float Span;
-    ImVector<ImVec2> Data;
-    RollingBuffer() {
-        Span = 10.0f;
-        Data.reserve(2000);
-    }
-    void AddPoint(float x, float y) {
-        float xmod = fmodf(x, Span);
-        if (!Data.empty() && xmod < Data.back().x)
-            Data.shrink(0);
-        Data.push_back(ImVec2(xmod, y));
-    }
-};
+
 
 namespace PigeonServerGUI{
 
@@ -62,6 +52,9 @@ namespace PigeonServerGUI{
      SDL_Event currentEvent;
      bool shouldClose = false;
      bool shouldDelete = false;
+
+    ImGuiLog* log = nullptr;
+
 
      int windowWidth = 1280;
      int windowHeight = 720;
@@ -89,6 +82,57 @@ namespace PigeonServerGUI{
         return 0;
     }
 
+    void PlotSent(double* sent){
+    
+        struct rusage usage;
+        static double t = 0;
+
+        static ScrollingBuffer buffer;
+
+        t += ImGui::GetIO().DeltaTime;
+
+        buffer.AddPoint(t,*sent);
+
+        if (ImPlot::BeginPlot("Bytes Sent",ImVec2(-1,175))) {
+            ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
+            ImPlot::SetupAxisLimits(ImAxis_X1,t-5, t, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1,0,300);
+
+            ImPlot::PlotLine("Bytes", &buffer.Data[0].x, &buffer.Data[0].y, buffer.Data.size(), 0, buffer.Offset, 2 * sizeof(int));
+
+            // End plot
+            ImPlot::EndPlot();
+        }
+        *sent = 0;
+        
+    }
+
+    void PlotData(double* data){
+    
+        struct rusage usage;
+        static double t = 0;
+
+        static ScrollingBuffer buffer;
+
+        t += ImGui::GetIO().DeltaTime;
+
+        buffer.AddPoint(t,*data);
+
+        if (ImPlot::BeginPlot("Bytes Recv",ImVec2(-1,175))) {
+            ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
+            ImPlot::SetupAxisLimits(ImAxis_X1,t-5, t, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1,0,300);
+
+            ImPlot::PlotLine("Bytes", &buffer.Data[0].x, &buffer.Data[0].y, buffer.Data.size(), 0, buffer.Offset, 2 * sizeof(float));
+
+            // End plot
+            ImPlot::EndPlot();
+        }
+    *data = 0;
+
+        
+    }
+
     void PlotFps(){
     
         struct rusage usage;
@@ -109,6 +153,7 @@ namespace PigeonServerGUI{
 
         // Begin plot
         if (ImPlot::BeginPlot("Framerate",ImVec2(-1,175))) {
+            ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
             ImPlot::SetupAxisLimits(ImAxis_X1,t-30, t, ImGuiCond_Always);
             ImPlot::SetupAxisLimits(ImAxis_Y1,30,90);
 
@@ -123,10 +168,10 @@ namespace PigeonServerGUI{
     }
 
     void ServerCreation(){
-        static std::string serverName = "";
-        static std::string serverPort = "";
-        static std::string certPath = "";
-        static std::string keyPath = "";
+        static std::string serverName = "PGN-EU-1";
+        static std::string serverPort = "4444";
+        static std::string certPath = "cert.pem";
+        static std::string keyPath = "key.pem";
 
         ImGui::Text("Sever  Name: ");
         ImGui::SameLine();
@@ -152,14 +197,17 @@ namespace PigeonServerGUI{
 
 
         if(ImGui::Button("Create Server")){
-            server = new PigeonServer(certPath,keyPath,serverName, std::stoi(serverPort));
-            std::thread([&]{
-                server->Run(shouldDelete);
-                shouldDelete = false;
-                delete server;
-                server = nullptr;
-                std::cout << "Killed thread" << std::endl;
-            }).detach();
+            if(server == nullptr){
+                log = new ImGuiLog();
+                server = new PigeonServer(certPath,keyPath,serverName, std::stoi(serverPort), log);
+                std::thread([&]{
+                    server->Run(shouldDelete);
+                    shouldDelete = false;
+                    delete server;
+                    log = nullptr;
+                    server = nullptr;
+                }).detach();
+            }
         }
 
         ImGui::SameLine();
@@ -173,7 +221,10 @@ namespace PigeonServerGUI{
 
     void ServerInformation(){
         ImVec4 color;
-    
+
+        auto now = std::chrono::system_clock::now();
+        std::time_t currentTime = std::chrono::system_clock::to_time_t(now);
+
         if(server==nullptr){
             color = ImVec4(255,0,0,255);
             status = "Server is not running!";            
@@ -183,6 +234,7 @@ namespace PigeonServerGUI{
         }
             ImGui::TextColored(color,status.c_str());
         if(server!=nullptr){
+            ImGui::BulletText(std::ctime(&currentTime));
             ImGui::BulletText("Clients connected: ");
             ImGui::SameLine();
             ImGui::Text((std::to_string((server->GetClients()->size()))).c_str());
@@ -255,7 +307,7 @@ namespace PigeonServerGUI{
 		style.ItemInnerSpacing = ImVec2(6.00f, 6.00f);
 		style.TouchExtraPadding = ImVec2(0.00f, 0.00f);
 		style.IndentSpacing = 25;
-		style.ScrollbarSize = 15;
+		style.ScrollbarSize = 5;
 		style.GrabMinSize = 10;
 		style.WindowBorderSize = 1;
 		style.ChildBorderSize = 1;
@@ -271,7 +323,7 @@ namespace PigeonServerGUI{
 		style.LogSliderDeadzone = 4;
 		style.TabRounding = 4;
         style.ScaleAllSizes(2.5);
-        ImGui::GetStyle().WindowRounding = 0.0f;// <- Set this on init or use ImGui::PushStyleVar()
+        ImGui::GetStyle().WindowRounding = 0.0f;
         ImGui::GetStyle().ChildRounding = 0.0f;
         ImGui::GetStyle().FrameRounding = 0.0f;
         ImGui::GetStyle().GrabRounding = 0.0f;
@@ -335,6 +387,7 @@ namespace PigeonServerGUI{
         ImGui::BeginChild("serv info",ImVec2(250, 220),true);
 
             ServerInformation();
+            
 
         ImGui::EndChild();
 
@@ -346,11 +399,18 @@ namespace PigeonServerGUI{
 
 
         ImGui::BeginChild("serv log",ImVec2(585, 425),true);
+            if(server!=nullptr){
+                log->Draw("Log");
+            }
         ImGui::EndChild();
 
         ImGui::SameLine();
 
         ImGui::BeginChild("plots",ImVec2(635, 425),true);
+        if(server!=nullptr && server->bytesRecv != nullptr && server->bytesSent != nullptr){
+            PlotData(server->bytesRecv);
+            PlotSent(server->bytesSent);
+        }
         ImGui::EndChild();
 
     }

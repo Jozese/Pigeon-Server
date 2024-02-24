@@ -49,8 +49,6 @@ public:
             close(sSocket);
             sSocket = -1;
         }
-
-        std::cout << "DELETED2" << std::endl;
     }
 
 protected:

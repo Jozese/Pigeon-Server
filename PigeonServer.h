@@ -9,10 +9,13 @@
 
 #pragma once
 
+
+
 #include <iostream>
 #include <string>
 #include <vector>
 #include <chrono>
+#include <cstring>
 
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -28,18 +31,34 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <jsoncpp/json/json.h>
 
 #include "TcpServer/TcpServer.h"
-#include "Logger/Logger.h"
 #include "PigeonPacket.h"
+#include "PigeonServerGUI/ImGuiLogger.h"
+#include <thread>
+
+enum Status{
+    ONLINE = 0,
+    IDLE = 1,
+    DND = 2,
+};
+
+/**
+ * @struct Client
+ * @brief Representation of a client in a Pigeon Server
+ */
 
 struct Client{
     SSL* clientSsl;
     std::time_t logTimestamp;
     std::string username;
+    Status status;
 
-    Client():clientSsl(nullptr), logTimestamp(std::time(0)), username(""){};
+    Client():clientSsl(nullptr), logTimestamp(std::time(0)), username(""), status(ONLINE){};
 };
+
+//UTILS
 static void printBytesInHex(const std::vector<unsigned char>& bytes) {
     for (const unsigned char& byte : bytes) {
         std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte) << " " << std::dec;
@@ -47,25 +66,47 @@ static void printBytesInHex(const std::vector<unsigned char>& bytes) {
     std::cout << std::endl;
 }
 
+static std::vector<unsigned char> StringToBytes(const std::string& str){
+    return std::vector<unsigned char>(str.begin(), str.end());
+}
+
+
+/**
+ * @class PigeonServer
+ * @brief A Server based on the Pigeon Protocol
+ */
+
 class PigeonServer: public TcpServer{
 
 public:
-    PigeonServer(const std::string& certPath, const std::string& keyPath, const std::string& serverName, unsigned short port);
+    PigeonServer(const std::string& certPath, const std::string& keyPath, const std::string& serverName, unsigned short port, ImGuiLog* log);
     ~PigeonServer(){
+        log->AddLog((GetDate() + " [INFO] DELETING SERVER \n").c_str());
         for(auto& p : *clients){
-            std::cout << "FREEING CLIENT " << std::to_string(p.first) << std::endl;
                 SSL_shutdown(p.second.clientSsl);
                 close(p.first);
-            std::cout << "FREED " << std::endl;
+            log->AddLog((GetDate() + " [FREE] FREED CLIENT FD: " + std::to_string(p.first) + "\n").c_str());
         }
+        //This is really bad practice but fixes the segfault, mutex is probably needed somewhere else
+        sleep(5);
+
+        log->Clear();
+
         delete clients;
-        std::cout << "DELETED" << std::endl;
+        delete bytesRecv;
+        delete bytesSent;
+        delete log;
+
+        bytesRecv = nullptr;
+        bytesSent = nullptr;
+        clients = nullptr;
+
     };
 public:
     void Run(bool&  shouldDelete);
     
     std::vector<unsigned char> ReadPacket(SSL* ssl1);
-    int ProcessPacket();
+    PigeonPacket ProcessPacket(PigeonPacket& recv, int clientFD);
 
     std::vector<unsigned char> SerializePacket(const PigeonPacket& packet);
     PigeonPacket DeserializePacket(std::vector<unsigned char>& packet);
@@ -85,12 +126,27 @@ public:
         return this->clients;
     }
 
+    inline std::string GetDate(){
+        auto now = std::chrono::system_clock::now();
+        std::time_t currentTime = std::chrono::system_clock::to_time_t(now);
+
+        std::string time = std::string(std::ctime(&currentTime));
+        size_t pos = time.find('\n');
+        if (pos != std::string::npos) {
+            time.erase(pos);
+        }
+        return time;
+    }
+
+    double* bytesRecv = nullptr;
+    double* bytesSent = nullptr;
+
 private:
     std::string serverName = "";
     std::mutex mapMutex;
     bool isLocked = false;
+    ImGuiLog* log = nullptr;
 
 private:
     std::unordered_map<int,Client>* clients;
-    Logger* logger = nullptr;
 };
