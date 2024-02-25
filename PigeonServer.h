@@ -50,12 +50,13 @@ enum Status{
  */
 
 struct Client{
+    std::string ipv4;
     SSL* clientSsl;
     std::time_t logTimestamp;
     std::string username;
     Status status;
 
-    Client():clientSsl(nullptr), logTimestamp(std::time(0)), username(""), status(ONLINE){};
+    Client():clientSsl(nullptr), logTimestamp(std::time(0)), username(""), status(ONLINE), ipv4(""){};
 };
 
 //UTILS
@@ -87,8 +88,6 @@ public:
                 close(p.first);
             log->AddLog((GetDate() + " [FREE] FREED CLIENT FD: " + std::to_string(p.first) + "\n").c_str());
         }
-        //This is really bad practice but fixes the segfault, mutex is probably needed somewhere else
-                        sleep(5);
 
         log->Clear();
 
@@ -119,20 +118,7 @@ public:
 
     void* BroadcastPacket(const PigeonPacket& packet);
 
-    void FreeClient(int c, SSL* cSSL){
-        shutdown(c,SHUT_RDWR);
-        close(c);
-        auto it = clients->find(c);
-        if (it != clients->end()) { 
-            delete it->second; 
-            clients->erase(it); 
-        }
-        SSL_free(cSSL);
-    };
     
-    void DisconnectClient(SSL* cSSL){
-        SSL_shutdown(cSSL);
-    }
     
 
 public:
@@ -152,6 +138,31 @@ public:
         return time;
     }
 
+    inline void FreeClient(int c, SSL* cSSL){
+        shutdown(c,SHUT_RDWR);
+        close(c);
+        auto it = clients->find(c);
+        if (it != clients->end()) { 
+            delete it->second; 
+            clients->erase(it); 
+        }
+        SSL_free(cSSL);
+    };
+    
+    inline void DisconnectClient(SSL* cSSL){
+        SSL_shutdown(cSSL);
+    }
+
+    inline bool CheckIp(const std::string& ipv4){
+        for(auto& c : *clients){
+            if(c.second->ipv4 == ipv4){
+                return true;
+            }
+        }
+        return false;
+    }
+
+public:
     double* bytesRecv = nullptr;
     double* bytesSent = nullptr;
 

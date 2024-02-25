@@ -37,18 +37,40 @@ void PigeonServer::Run(bool& shouldDelete) {
 
         while (1)
         {
-            
-        sockaddr_in clientAddr;
-        unsigned int len = sizeof(sockaddr_in);
+            /*
+            * We need to store clients ip, just in case another client with the same ip tries to connect.
+            * Checking is done before SSL/TLS handshake. If after TCP handhsake ip is duplicated, con will be closed.
+            * 
+            * This isnt really needed, but it provides another layer of security against attacks in a local network env.
+            * Another approach should be used if this ever gets deployed.
+            */
 
-        int client = accept(sSocket, (struct sockaddr*)&addr, &len);
+            sockaddr_in clientAddr;
+            unsigned int len = sizeof(sockaddr_in);
+
+            int client = accept(sSocket, (struct sockaddr*)&addr, &len);
+
+            char clientIp[INET_ADDRSTRLEN];
+
+            struct sockaddr_in* pV4Addr = (struct sockaddr_in*)&addr;
+
+            struct in_addr ipAddr = pV4Addr->sin_addr;
+
+            inet_ntop(AF_INET, &ipAddr, clientIp, INET_ADDRSTRLEN);
+        
 
         if (client < 0) {
             log->AddLog((GetDate() + " [ERR] Failed TCP Handshake\n").c_str());
             continue;
         }
 
-            log->AddLog((GetDate() + " [OK] TCP Handshake\n").c_str());
+        if(CheckIp(std::string(clientIp))){
+            log->AddLog((GetDate() + " [ERR] IP is already in use \n").c_str());
+            close(client);
+            continue;
+        }
+
+        log->AddLog((GetDate() + " [OK] TCP Handshake\n").c_str());
 
 
         ssl = SSL_new(sslCtx);
@@ -63,10 +85,12 @@ void PigeonServer::Run(bool& shouldDelete) {
                 log->AddLog((GetDate() + " [OK] SSL/TLS Handshake\n").c_str());
                 Client* client1 = new Client();
                 client1->clientSsl = ssl;
+                client1->ipv4 = std::string(clientIp);
                 auto latestClientIter = clients->insert({client,client1});
 
                 /*
-                *  Each client is managed within its own thread.
+                *  Each client is managed within its own thread. Probably not the best approach efficiently wise, but its pretty simple to implement.
+                *  Others approach with select() and non blocking network I/O calls might perform better but are not as easy to implement.   
                 *  Thread is terminated when the read packet was empty (meaning error while recving or client was closed)
                 *  or the recv packet was not processed correctly.
                 *
@@ -300,7 +324,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
      */
 //Packet is 4 bytes + 8 bytes + 1 byte + username (max 20 chars == 20 bytes) + 1 byte null char + 4 bytes payload size + payload ( max 256 MB)  
 std::vector<unsigned char> PigeonServer::ReadPacket(SSL* ssl1){
-    std::vector<unsigned char> packetBuffer(100000000);
+    std::vector<unsigned char> packetBuffer(MAX_HEADER);
 
     int total = TcpServer::Recv(packetBuffer,4,0,ssl1);
 
@@ -312,6 +336,11 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL* ssl1){
     int headerLength = 0;
     for (int i = 0; i < 4; ++i) {
         headerLength |= packetBuffer[i] << (8 * i); 
+    }
+
+    if(headerLength > MAX_HEADER){
+        log->AddLog((GetDate() + " [FATAL] PACKET TOO BIG \n").c_str());
+        return {};
     }
 
     total = TcpServer::Recv(packetBuffer,headerLength + 4,total,ssl1);
