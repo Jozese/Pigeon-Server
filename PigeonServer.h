@@ -83,12 +83,12 @@ public:
     ~PigeonServer(){
         log->AddLog((GetDate() + " [INFO] DELETING SERVER \n").c_str());
         for(auto& p : *clients){
-                SSL_shutdown(p.second.clientSsl);
+                SSL_shutdown(p.second->clientSsl);
                 close(p.first);
             log->AddLog((GetDate() + " [FREE] FREED CLIENT FD: " + std::to_string(p.first) + "\n").c_str());
         }
         //This is really bad practice but fixes the segfault, mutex is probably needed somewhere else
-        sleep(5);
+                        sleep(5);
 
         log->Clear();
 
@@ -100,6 +100,10 @@ public:
         bytesRecv = nullptr;
         bytesSent = nullptr;
         clients = nullptr;
+        log = nullptr;
+
+
+
 
     };
 public:
@@ -116,13 +120,23 @@ public:
     void* BroadcastPacket(const PigeonPacket& packet);
 
     void FreeClient(int c, SSL* cSSL){
-        SSL_shutdown(cSSL);
+        shutdown(c,SHUT_RDWR);
         close(c);
-        clients->erase(c);
+        auto it = clients->find(c);
+        if (it != clients->end()) { 
+            delete it->second; 
+            clients->erase(it); 
+        }
+        SSL_free(cSSL);
     };
+    
+    void DisconnectClient(SSL* cSSL){
+        SSL_shutdown(cSSL);
+    }
+    
 
 public:
-    inline std::unordered_map<int,Client>* GetClients(){
+    inline std::unordered_map<int,Client*>* GetClients(){
         return this->clients;
     }
 
@@ -148,5 +162,6 @@ private:
     ImGuiLog* log = nullptr;
 
 private:
-    std::unordered_map<int,Client>* clients;
+    std::unordered_map<int,Client*>* clients;
+    std::vector<std::thread> threadPool;
 };

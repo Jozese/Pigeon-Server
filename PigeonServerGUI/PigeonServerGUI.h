@@ -201,22 +201,11 @@ namespace PigeonServerGUI{
                 log = new ImGuiLog();
                 server = new PigeonServer(certPath,keyPath,serverName, std::stoi(serverPort), log);
                 std::thread([&]{
-                    server->Run(shouldDelete);
-                    shouldDelete = false;
-                    delete server;
-                    log = nullptr;
-                    server = nullptr;
+                    server->Run(shouldDelete);                    
                 }).detach();
             }
         }
 
-        ImGui::SameLine();
-
-        if(ImGui::Button("Delete Server")){
-            if(server!=nullptr){
-                shouldDelete = true;
-            }
-        }
     }
 
     void ServerInformation(){

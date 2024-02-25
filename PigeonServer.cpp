@@ -13,7 +13,7 @@
 PigeonServer::PigeonServer(const std::string& certPath, const std::string& keyPath, const std::string& serverName, unsigned short port,ImGuiLog* log):
     TcpServer(certPath,keyPath,port), serverName(serverName),log(log)
 {
-    clients = new std::unordered_map<int,Client>();
+    clients = new std::unordered_map<int,Client*>();
     this->bytesRecv = new double(0);
     this->bytesSent = new double(0);
 
@@ -41,23 +41,6 @@ void PigeonServer::Run(bool& shouldDelete) {
         sockaddr_in clientAddr;
         unsigned int len = sizeof(sockaddr_in);
 
-        struct timeval timeout;
-        timeout.tv_sec = 1; 
-        timeout.tv_usec = 0;
-
-        fd_set readfds;
-        FD_ZERO(&readfds);
-        FD_SET(sSocket, &readfds);
-
-        int result = select(sSocket + 1, &readfds, nullptr, nullptr, &timeout);
-        if (result < 0) {
-            break;
-        } else if (result == 0) {
-            if(shouldDelete)
-                break;
-            continue;
-        }
-
         int client = accept(sSocket, (struct sockaddr*)&addr, &len);
 
         if (client < 0) {
@@ -78,47 +61,64 @@ void PigeonServer::Run(bool& shouldDelete) {
             continue;
         } else {
                 log->AddLog((GetDate() + " [OK] SSL/TLS Handshake\n").c_str());
-                Client client1;
-                client1.clientSsl = ssl;
+                Client* client1 = new Client();
+                client1->clientSsl = ssl;
                 auto latestClientIter = clients->insert({client,client1});
+
+                /*
+                *  Each client is managed within its own thread.
+                *  Thread is terminated when the read packet was empty (meaning error while recving or client was closed)
+                *  or the recv packet was not processed correctly.
+                *
+                * 
+                */
 
                 std::thread([latestClientIter, this]{
                     log->AddLog((GetDate() + " [INFO] NEW THREAD FOR CLIENT FD: " + std::to_string(latestClientIter.first->first) + "\n").c_str());
-                    //logger->log(INFO, " NEW THREAD FOR CLIENT FD: " + std::to_string(latestClientIter.first->first));
                     while (1)
                     {   
 
-                        auto a = ReadPacket(latestClientIter.first->second.clientSsl);
-                        //logger->log(DEBUG, "PACKET RECV FROM FD: " + std::to_string(latestClientIter.first->first) + " SIZE: " + std::to_string(a.size()) + " BYTES");
+                        std::vector<unsigned char> a = ReadPacket(latestClientIter.first->second->clientSsl);
+                        std::cout << a.size() << std::endl;
 
-                        *this->bytesRecv += a.size();
 
-                        if(a.empty()){
-                            log->AddLog((GetDate() + " [INFO] ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first) + "\n").c_str());
-                            //logger->log(INFO, "ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));
-                            
-                            int key = latestClientIter.first->first;
-                            Client client = latestClientIter.first->second;                                               
-
-                            //posible race condition con destructor pero me da igual
-                            this->FreeClient(key,client.clientSsl);    
-                            log->AddLog((GetDate() + " [INFO] AMOUNT OF CLIENTS: " + std::to_string(clients->size()) + "\n").c_str());             
-                            break;
+                        if(!a.empty() && bytesRecv != nullptr){
+                            *this->bytesRecv += a.size();
                         }
 
-                        //PROCESS PACKET
-                        std::unique_lock<std::mutex>(mapMutex);
+                        if(a.empty()){
+     
+                                if(clients->find(latestClientIter.first->first) != clients->end()){
+                                    log->AddLog((GetDate() + " [FIN] ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first) + "\n").c_str());             
+                                    
+                                    DisconnectClient(latestClientIter.first->second->clientSsl);
+                                    FreeClient(latestClientIter.first->first,latestClientIter.first->second->clientSsl);
 
+                                    log->AddLog((GetDate() + " [FIN] AMOUNT OF CLIENTS: " + std::to_string(clients->size()) + "\n").c_str());             
+                                }
+                            break;
+                        }
                         auto c = DeserializePacket(a);
                    
                         PigeonPacket toSend = ProcessPacket(c,latestClientIter.first->first);
 
-                        //idk if mutex necessry but just in case
+                        std::cout << std::hex << toSend.HEADER.OPCODE << std::dec << std::endl;
+
+                        if(toSend.HEADER.OPCODE == USER_COLLISION || toSend.HEADER.OPCODE == LENGTH_EXCEEDED){
+                            if(clients->find(latestClientIter.first->first) != clients->end()){
+                                log->AddLog((GetDate() + " [FIN] ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first) + "\n").c_str());             
+                                DisconnectClient(latestClientIter.first->second->clientSsl);
+                                FreeClient(latestClientIter.first->first,latestClientIter.first->second->clientSsl);
+                                log->AddLog((GetDate() + " [FIN] AMOUNT OF CLIENTS: " + std::to_string(clients->size()) + "\n").c_str());             
+                                
+                            }
+                            break;
+                        }
+
                         BroadcastPacket(toSend);
 
-
-
                     }
+                    return;
                 }).detach();
                 
                 
@@ -204,7 +204,7 @@ PigeonPacket PigeonServer::DeserializePacket(std::vector<unsigned char>& packet)
 PigeonPacket PigeonServer::BuildPacket(PIGEON_OPCODE opcode, const std::string& username, const std::vector<unsigned char>& payload){
 
     PigeonPacket pkt;
-        pkt.HEADER.OPCODE = CLIENT_HELLO;
+        pkt.HEADER.OPCODE = opcode;
         pkt.PAYLOAD = payload;
         pkt.HEADER.CONTENT_LENGTH = pkt.PAYLOAD.size();
         pkt.HEADER.TIME_STAMP = std::time(0);
@@ -222,12 +222,14 @@ PigeonPacket PigeonServer::BuildPacket(PIGEON_OPCODE opcode, const std::string& 
      * @brief Builds a new packet using BuildPacket based on the recived packet.
      * @param recv Recived PigeonPacket.
      */
+// TODO: ADD LOGS FOR EACH EDGE CASE
 PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
     PigeonPacket newPacket;
     Json::Reader reader;
     Json::Value value;
 
-    std::cout << recv.HEADER.OPCODE << std::endl;
+    //If client completed handshake, username is stored in Client, if a client tries to send a packet before making a handshake (aka his username doesnt exist), bad client = close con,
+    // that way we ensure a client has completed handshake properly
 
     switch (recv.HEADER.OPCODE)
     {
@@ -235,33 +237,56 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
         if(!recv.PAYLOAD.empty() && !recv.HEADER.username.empty()){
             newPacket = BuildPacket(SERVER_HELLO,recv.HEADER.username,StringToBytes(R"({"ServerName":")" + this->serverName + R"("})"));
             
-
             auto it = this->clients->find(clientFD);
             
             if(!reader.parse(std::string(recv.PAYLOAD.begin(), recv.PAYLOAD.end()), value)){
-                std::cout << "FAILED READING" << std::endl;
-                printBytesInHex(recv.PAYLOAD);
                 newPacket = BuildPacket(JSON_NOT_VALID, "",{});
             }
 
             log->AddLog((GetDate() + " [INFO] CLIENT HELLO FROM: " + recv.HEADER.username + " STATUS: " + value["status"].asString() + "\n").c_str());
 
             if (it != clients->end()) {
-                it->second.logTimestamp = std::time(0);
-                it->second.username = recv.HEADER.username;
-                if(value["status"].asString() == "ONLINE"){
-                    it->second.status = ONLINE;
+                it->second->logTimestamp = std::time(0);
+
+                bool exists = false;
+                for(auto& p : *this->clients){
+                    if(p.second->username == recv.HEADER.username)
+                        exists = true;
+                }   
+
+                //On connection, status will be Online by default.
+                if(!exists){
+                    it->second->username = recv.HEADER.username;
+
+                    if(value["status"].asString() == "ONLINE"){
+                        it->second->status = ONLINE;
+                    }
+                    else if(value["status"].asString() == "IDLE"){
+                        it->second->status = IDLE;
+                    }
+                    else if(value["status"].asString() == "DND"){
+                        it->second->status = DND;
+                    }
+                }else{
+                    newPacket = BuildPacket(USER_COLLISION, recv.HEADER.username,{});
+                    log->AddLog((GetDate() + " [ERR] USER COLLISION: " + recv.HEADER.username + " IS ALREADY USED" + "\n").c_str());
                 }
-                else if(value["status"].asString() == "IDLE"){
-                    it->second.status = IDLE;
-                }
-                else if(value["status"].asString() == "DND"){
-                    it->second.status = DND;
+
+                //Username max length check
+                if(it->second->username.length() > MAX_USERNAME){
+                    newPacket = BuildPacket(LENGTH_EXCEEDED,recv.HEADER.username,{});
+                    log->AddLog((GetDate() + " [ERR] USERNAME LENGTH EXCEEDED: " + recv.HEADER.username + "\n").c_str());
                 }
             }
         }else{
-            newPacket = BuildPacket(PROTOCOL_MISMATCH, "",{});
+            newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username,{});
         }
+        break;
+
+
+
+    default:
+        newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username,{});
         break;
 
     }
@@ -275,10 +300,11 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
      */
 //Packet is 4 bytes + 8 bytes + 1 byte + username (max 20 chars == 20 bytes) + 1 byte null char + 4 bytes payload size + payload ( max 256 MB)  
 std::vector<unsigned char> PigeonServer::ReadPacket(SSL* ssl1){
-    std::vector<unsigned char> packetBuffer(MAX_HEADER);
+    std::vector<unsigned char> packetBuffer(100000000);
 
     int total = TcpServer::Recv(packetBuffer,4,0,ssl1);
 
+    //This could also mean error when receving. In case of error/wrong packet, empty vector is returned and the connection will be closed
     if(total < 4){
         return {};
     }
@@ -290,6 +316,7 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL* ssl1){
 
     total = TcpServer::Recv(packetBuffer,headerLength + 4,total,ssl1);
 
+
     packetBuffer.resize(total);
 
     int payloadLength = 0;
@@ -299,6 +326,7 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL* ssl1){
     packetBuffer.resize(packetBuffer.size() + payloadLength);
 
     total = TcpServer::Recv(packetBuffer,headerLength + 4 + payloadLength,total,ssl1);
+
 
     return packetBuffer;
 }
@@ -314,10 +342,9 @@ void* PigeonServer::BroadcastPacket(const PigeonPacket& packet){
     if(!packetToSend.empty()){
         for(auto& c : *clients){
             clientsStr += std::to_string(c.first) + " ";
-            sent = SendAll(packetToSend, c.second.clientSsl);
+            sent = SendAll(packetToSend, c.second->clientSsl);
 
         }
-        //logger->log(DEBUG, "BRD " + std::to_string(sent) + " BYTES TO FDs: " + clientsStr);
     }
     return nullptr;
 }

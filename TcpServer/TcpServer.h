@@ -35,11 +35,7 @@ public:
     inline int GetSocketFD(){ return sSocket;};
 
     ~TcpServer() {
-        if (ssl != nullptr) {
-            SSL_free(ssl);
-            ssl = nullptr;
-        }
-
+    
         if (sslCtx != nullptr) {
             SSL_CTX_free(sslCtx);
             sslCtx = nullptr;
