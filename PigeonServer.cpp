@@ -19,7 +19,6 @@ PigeonServer::PigeonServer(const std::string& certPath, const std::string& keyPa
 
 
     log->AddLog((GetDate() + " [INFO] Setting up TCP server\n").c_str());
-    std::cout << this->certPath << " - " << this->privateKey << std::endl;
 
     if(TcpServer::Setup() != 0){
         throw std::string("[ERROR] PigeonServer::PigeonServer Error while setting up tcp server");
@@ -103,7 +102,6 @@ void PigeonServer::Run(bool& shouldDelete) {
                     {   
 
                         std::vector<unsigned char> a = ReadPacket(latestClientIter.first->second->clientSsl);
-                        std::cout << a.size() << std::endl;
 
 
                         if(!a.empty() && bytesRecv != nullptr){
@@ -125,8 +123,6 @@ void PigeonServer::Run(bool& shouldDelete) {
                         auto c = DeserializePacket(a);
                    
                         PigeonPacket toSend = ProcessPacket(c,latestClientIter.first->first);
-
-                        std::cout << std::hex << toSend.HEADER.OPCODE << std::dec << std::endl;
 
                         if(toSend.HEADER.OPCODE == USER_COLLISION || toSend.HEADER.OPCODE == LENGTH_EXCEEDED){
                             if(clients->find(latestClientIter.first->first) != clients->end()){
@@ -201,19 +197,23 @@ PigeonPacket PigeonServer::DeserializePacket(std::vector<unsigned char>& packet)
     offset += sizeof(std::time_t);
 
     while (packet[offset] != '\0') {
+        std::cout <<  packet[offset] << std::endl;
         packetRet.HEADER.username.push_back(packet[offset]);
         offset++;
     }
 
-
+    offset++;
     //opc
     packetRet.HEADER.OPCODE = static_cast<PIGEON_OPCODE>(packet[offset]);
+    std::cout << packet[offset] << std::endl;
     offset++;
+
+
 
     std::memcpy(&packetRet.HEADER.CONTENT_LENGTH, &packet[offset], sizeof(int));
     offset += sizeof(int);
 
-    packetRet.PAYLOAD.assign(packet.begin() + offset + 1, packet.end());
+    packetRet.PAYLOAD.assign(packet.begin() + offset, packet.end());
     return packetRet;
 
 }
@@ -255,16 +255,18 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
     //If client completed handshake, username is stored in Client, if a client tries to send a packet before making a handshake (aka his username doesnt exist), bad client = close con,
     // that way we ensure a client has completed handshake properly
 
+
     switch (recv.HEADER.OPCODE)
     {
     case CLIENT_HELLO:
         if(!recv.PAYLOAD.empty() && !recv.HEADER.username.empty()){
-            newPacket = BuildPacket(SERVER_HELLO,recv.HEADER.username,StringToBytes(R"({"ServerName":")" + this->serverName + R"("})"));
+            newPacket = BuildPacket(SERVER_HELLO,recv.HEADER.username,String::StringToBytes(R"({"ServerName":")" + this->serverName + R"("})"));
             
             auto it = this->clients->find(clientFD);
             
             if(!reader.parse(std::string(recv.PAYLOAD.begin(), recv.PAYLOAD.end()), value)){
                 newPacket = BuildPacket(JSON_NOT_VALID, "",{});
+                break;
             }
 
             log->AddLog((GetDate() + " [INFO] CLIENT HELLO FROM: " + recv.HEADER.username + " STATUS: " + value["status"].asString() + "\n").c_str());
@@ -272,6 +274,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
             if (it != clients->end()) {
                 it->second->logTimestamp = std::time(0);
 
+                //Does username already exist?
                 bool exists = false;
                 for(auto& p : *this->clients){
                     if(p.second->username == recv.HEADER.username)
@@ -302,12 +305,80 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
                     log->AddLog((GetDate() + " [ERR] USERNAME LENGTH EXCEEDED: " + recv.HEADER.username + "\n").c_str());
                 }
             }
+        }
+        else{
+            newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username,{});
+        }
+        break;
+
+    case TEXT_MESSAGE:
+        if(!recv.PAYLOAD.empty() && !recv.HEADER.username.empty()){
+
+            //We can saftely assume that after a successfful CLIENT_HELLO, the clients fd has a valid username and is connected
+            //So we need to check if the FD who sent the packet has the same username thats contained in the packet itself.
+
+            auto it = clients->find(clientFD);
+            if(it->second->username == recv.HEADER.username){
+                //If both usernames match, we just need to verify the packets payload
+                if(recv.PAYLOAD.size() <  256 * 1024 * 1024){
+                    newPacket = BuildPacket(TEXT_MESSAGE, recv.HEADER.username,recv.PAYLOAD);
+                }else{
+                    newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username,{});
+                }
+            }
+            else {
+                newPacket = BuildPacket(USERNAME_MISMATCH, recv.HEADER.username,{});
+            }
+            
+
+
         }else{
             newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username,{});
         }
         break;
 
+    case MEDIA_FILE:
+        if(!recv.PAYLOAD.empty() && !recv.HEADER.username.empty()){
 
+            std::cout << (GetDate() + " [INFO] NEW MEDIA FILE BY: " + recv.HEADER.username + "\n").c_str() << std::endl;
+
+            auto it = clients->find(clientFD);
+            if(it->second->username == recv.HEADER.username){
+
+
+                if(std::time(0) - it->second->logTimestamp < 1){
+                    newPacket = BuildPacket(RATE_LIMITED, recv.HEADER.username,{});
+                    break;
+                }
+                std::cout << "a" << std::endl;
+
+                it->second->logTimestamp = std::time(0);
+                if(!reader.parse(std::string(recv.PAYLOAD.begin(), recv.PAYLOAD.end()), value)){
+                    newPacket = BuildPacket(JSON_NOT_VALID, recv.HEADER.username,{});
+                    break;
+                }
+                std::cout << "b" << std::endl;
+
+                std::string fileContent = "";
+                std::string fileExt = "";
+
+                fileContent = value["content"].asString();
+                fileExt = value["ext"].asString();
+
+                std::cout << (GetDate() + " [INFO] NEW MEDIA FILE BY: " + recv.HEADER.username + "\n").c_str() << std::endl;
+
+
+                auto contentBuffer = String::StringToBytes(B64::base64_decode(fileContent));
+                bool err = File::BufferToDisk(contentBuffer, (it->second->username + "_" + std::to_string(recv.HEADER.TIME_STAMP) + "." + fileExt));
+
+            };
+            break;
+        }
+        else
+        {
+            newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username,{});
+        }
+        break;
 
     default:
         newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username,{});
@@ -347,6 +418,9 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL* ssl1){
 
 
     packetBuffer.resize(total);
+
+    printBytesInHex(packetBuffer);
+
 
     int payloadLength = 0;
     for (int i = packetBuffer.size()-1; i >= packetBuffer.size() - 4; --i) {

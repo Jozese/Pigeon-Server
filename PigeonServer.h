@@ -27,6 +27,7 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <iomanip>
+#include <regex>
 #include <mutex>
 
 #include <openssl/ssl.h>
@@ -36,6 +37,7 @@
 #include "TcpServer/TcpServer.h"
 #include "PigeonPacket.h"
 #include "PigeonServerGUI/ImGuiLogger.h"
+#include "Utils.h"
 #include <thread>
 
 enum Status{
@@ -67,9 +69,7 @@ static void printBytesInHex(const std::vector<unsigned char>& bytes) {
     std::cout << std::endl;
 }
 
-static std::vector<unsigned char> StringToBytes(const std::string& str){
-    return std::vector<unsigned char>(str.begin(), str.end());
-}
+
 
 
 /**
@@ -120,7 +120,7 @@ public:
 
     
     
-
+//UTILS
 public:
     inline std::unordered_map<int,Client*>* GetClients(){
         return this->clients;
@@ -160,6 +160,11 @@ public:
             }
         }
         return false;
+    }
+
+    inline bool isBase64(const std::string& str){
+        std::regex b64Pattern("^(?:[A-Za-z0-9+\\/]{4})*(?:[A-Za-z0-9+\\/]{2}==|[A-Za-z0-9+\\/]{3}=|[A-Za-z0-9+\\/]{4})$");
+        return std::regex_match(str,b64Pattern);
     }
 
 public:

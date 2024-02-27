@@ -53,6 +53,8 @@ namespace PigeonServerGUI{
      bool shouldClose = false;
      bool shouldDelete = false;
 
+    static bool shouldLog = false;
+
     ImGuiLog* log = nullptr;
 
 
@@ -206,6 +208,13 @@ namespace PigeonServerGUI{
             }
         }
 
+        ImGui::SameLine();
+
+        if(ImGui::Button("Clear Logs")){
+            if(log != nullptr){
+                log->Clear();
+            }
+        }
     }
 
     void ServerInformation(){
@@ -227,6 +236,7 @@ namespace PigeonServerGUI{
             ImGui::BulletText("Clients connected: ");
             ImGui::SameLine();
             ImGui::Text((std::to_string((server->GetClients()->size()))).c_str());
+            ImGui::Checkbox("Show Logs", &shouldLog);
         }
     }   
 
@@ -364,6 +374,12 @@ namespace PigeonServerGUI{
         ImGui::Begin("Pigeon Control Panel", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
     }
 
+    /*
+    *  Creation of all child windows.
+    *  
+    * 
+    */
+
     void RenderTabBar(){
         ImGui::BeginChild("srv creation",ImVec2(320, 220),true);
 
@@ -377,18 +393,19 @@ namespace PigeonServerGUI{
 
             ServerInformation();
             
-
         ImGui::EndChild();
 
         ImGui::SameLine();
 
         ImGui::BeginChild("FPSw",ImVec2(635, 220),true);
+
             PlotFps();
+            
         ImGui::EndChild();
 
 
         ImGui::BeginChild("serv log",ImVec2(585, 425),true);
-            if(server!=nullptr){
+            if(server!=nullptr && shouldLog){
                 log->Draw("Log");
             }
         ImGui::EndChild();
