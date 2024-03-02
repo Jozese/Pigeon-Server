@@ -18,6 +18,25 @@ namespace File{
         }
         return true;
     }
+
+    static std::vector<unsigned char> DiskToBuffer(const std::string& filename) {
+        std::vector<unsigned char> buffer;
+        std::ifstream infile(filename, std::ios::in | std::ios::binary);
+
+        if (infile.is_open()) {
+            infile.seekg(0, std::ios::end);
+            std::streampos fileSize = infile.tellg();
+            infile.seekg(0, std::ios::beg);
+
+            buffer.resize(fileSize);
+
+            infile.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+
+            infile.close();
+        }
+
+        return buffer;
+    }
 }
 
 namespace String {
