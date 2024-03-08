@@ -103,8 +103,8 @@ void PigeonServer::Run(bool& shouldDelete) {
 
                         std::vector<unsigned char> a = ReadPacket(latestClientIter.first->second->clientSsl);
 
-
                         if(!a.empty() && bytesRecv != nullptr){
+                            std::unique_lock<std::mutex>(recvMutex);
                             *this->bytesRecv += a.size();
                         }
 
@@ -116,16 +116,22 @@ void PigeonServer::Run(bool& shouldDelete) {
                                     DisconnectClient(latestClientIter.first->second->clientSsl);
                                     FreeClient(latestClientIter.first->first,latestClientIter.first->second->clientSsl);
 
+                                    //If a client doesnt complete the handshake a broadcast of presence will also be sent, shouldnt be a concern at least for now
+
                                     std::string toSend = "{";
                                     for(auto& c : *clients){
-                                        std::string pair = ( '"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
-                                        toSend += pair;
+                                        if(!c.second->username.empty()){
+                                            std::string pair = ( '"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
+                                            toSend += pair;
+                                        }
                                     }
                                     
-                                    //remove last ,
-                                    toSend.pop_back();
-                                    toSend += '}';
-
+                                    if(toSend.length() >= 2){
+                                        //remove last ,
+                                        toSend.pop_back();
+                                        toSend += '}';
+                                    }
+                                   
                                     BroadcastPacket(BuildPacket(PRESENCE_UPDATE,this->serverName,String::StringToBytes(toSend)));
 
                                     log->AddLog((GetDate() + " [FIN] AMOUNT OF CLIENTS: " + std::to_string(clients->size()) + "\n").c_str());             
@@ -135,6 +141,18 @@ void PigeonServer::Run(bool& shouldDelete) {
                         auto c = DeserializePacket(a);
                    
                         PigeonPacket toSend = ProcessPacket(c,latestClientIter.first->first);
+
+                        if(!a.empty() && bytesRecv != nullptr){
+                            std::unique_lock<std::mutex>(sentMutex);
+                            *this->bytesSent += SerializePacket(toSend).size();
+                        }
+
+                        if(toSend.HEADER.OPCODE == ACK_MEDIA_DOWNLOAD){
+                            log->AddLog((GetDate() + " [INFO] SENDING FILE TO " +latestClientIter.first->second->username + "\n").c_str());
+                             auto bufToSend = SerializePacket(toSend);
+                             SendAll(bufToSend,latestClientIter.first->second->clientSsl);
+                             continue;
+                        }
 
                         //if to send is server_hello, that means a successfull client_hello was read, so we notify the right client and then we broadcast the new presence list to evry client
                         if(toSend.HEADER.OPCODE == SERVER_HELLO){
@@ -161,8 +179,8 @@ void PigeonServer::Run(bool& shouldDelete) {
                             continue;
                         }
 
-                        //bad packer, close connection and notify all clients
-                        if(toSend.HEADER.OPCODE == USER_COLLISION || toSend.HEADER.OPCODE == LENGTH_EXCEEDED || toSend.HEADER.OPCODE == JSON_NOT_VALID){
+                        //bad packet, close connection and notify all clients
+                        if(toSend.HEADER.OPCODE == USER_COLLISION || toSend.HEADER.OPCODE == LENGTH_EXCEEDED || toSend.HEADER.OPCODE == JSON_NOT_VALID || toSend.HEADER.OPCODE == RATE_LIMITED || toSend.HEADER.OPCODE == FILE_NOT_FOUND || toSend.HEADER.OPCODE == USERNAME_MISMATCH){
                             if(clients->find(latestClientIter.first->first) != clients->end()){
                                 
                                 log->AddLog((GetDate() + " [FIN] ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first) + "\n").c_str());             
@@ -381,7 +399,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
             auto it = clients->find(clientFD);
             if(it->second->username == recv.HEADER.username){
                 //If both usernames match, we just need to verify the packets payload
-                if(recv.PAYLOAD.size() >  256 * 1000 * 1000){
+                if(recv.PAYLOAD.size() >  512){
                     log->AddLog((GetDate() + " [ERR] MESSAGE TOO BIG: " + recv.HEADER.username + "\n").c_str());
                     newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username,{});                
                     break;
@@ -415,7 +433,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
                     break;
                 }
 
-                if(std::time(0) - it->second->logTimestamp < 1){
+                if(std::time(0) - it->second->logTimestamp < 15){
                     newPacket = BuildPacket(RATE_LIMITED, recv.HEADER.username,{});
                     log->AddLog((GetDate() + " [ERR] RATE LIMITED: " + recv.HEADER.username + "\n").c_str());
                     break;
@@ -447,9 +465,12 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
                 auto contentBuffer = String::StringToBytes(B64::base64_decode(fileContent));
                 bool err = File::BufferToDisk(recv.PAYLOAD, ("Files/" + it->second->username + "_" + fileName + ".json"));
 
-            };
-            newPacket = BuildPacket(USERNAME_MISMATCH, recv.HEADER.username,{});
-            break;
+                newPacket = BuildPacket(MEDIA_FILE,recv.HEADER.username,String::StringToBytes(R"({"filename":")" + it->second->username + "_" + fileName + R"("})"));
+
+            }else{
+                newPacket = BuildPacket(USERNAME_MISMATCH, recv.HEADER.username,{});
+            }
+            break;            
         }
         else
         {
@@ -476,7 +497,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
                 break;
             }
             
-            if(std::time(0) - it->second->logTimestamp < 1){
+            if(std::time(0) - it->second->logTimestamp < 15){
                     newPacket = BuildPacket(RATE_LIMITED, recv.HEADER.username,{});
                     log->AddLog((GetDate() + " [ERR] RATE LIMITED: " + recv.HEADER.username + "\n").c_str());
                     break;
@@ -519,10 +540,10 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
 
     case PRESENCE_REQUEST:
 
-        log->AddLog((GetDate() + " [INFO] NEW PRESENCE UPDATE BY: " + recv.HEADER.username + "\n").c_str());
-
         if(!recv.HEADER.username.empty()){
-            
+
+            log->AddLog((GetDate() + " [INFO] NEW PRESENCE REQUEST BY: " + recv.HEADER.username + "\n").c_str());
+
             auto it = clients->find(clientFD);
 
             if(it->second->username != recv.HEADER.username){
@@ -543,7 +564,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
             toSend += '}';
 
 
-            newPacket = BuildPacket(ACK_PRESENCE_REQUEST,recv.HEADER.username,String::StringToBytes(toSend));
+            newPacket = BuildPacket(PRESENCE_UPDATE,recv.HEADER.username,String::StringToBytes(toSend));
 
         }
         else
@@ -554,6 +575,54 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
         break;
 
 
+    case PRESENCE_UPDATE:
+        if(!recv.PAYLOAD.empty() && !recv.HEADER.username.empty()){
+            log->AddLog((GetDate() + " [INFO] NEW PRESENCE REQUEST BY: " + recv.HEADER.username + "\n").c_str());
+
+            if(recv.PAYLOAD.size() >  256 * 1000 * 1000){
+                    log->AddLog((GetDate() + " [ERR] MESSAGE TOO BIG: " + recv.HEADER.username + "\n").c_str());
+                    newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username,{});                
+                    break;
+            }
+
+            auto it = this->clients->find(clientFD);
+            
+            if(it->second->username != recv.HEADER.username){
+                newPacket = BuildPacket(USERNAME_MISMATCH, recv.HEADER.username,{});
+                break;
+            }
+
+            if(!reader.parse(std::string(recv.PAYLOAD.begin(), recv.PAYLOAD.end()), value)){
+                newPacket = BuildPacket(JSON_NOT_VALID, "",{});
+                break;
+            }
+
+                    if(value["status"].asString() == "ONLINE"){
+                        it->second->status = ONLINE;
+                    }
+                    else if(value["status"].asString() == "IDLE"){
+                        it->second->status = IDLE;
+                    }
+                    else if(value["status"].asString() == "DND"){
+                        it->second->status = DND;
+                    }
+            
+            std::string toSend = "{";
+            for(auto& c : *clients){
+                std::string pair = ( '"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
+                toSend += pair;
+            }
+            
+            //remove last ,
+            toSend.pop_back();
+            toSend += '}';
+
+
+            newPacket = BuildPacket(PRESENCE_UPDATE,recv.HEADER.username,String::StringToBytes(toSend));
+        
+        }else{
+            newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username,{});
+        }
     default:
         newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username,{});
         break;
@@ -584,7 +653,7 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL* ssl1){
     }
 
     if(headerLength > MAX_HEADER){
-        log->AddLog((GetDate() + " [FATAL] PACKET TOO BIG \n").c_str());
+        log->AddLog((GetDate() + " [FATAL] PACKET HEADER TOO BIG \n").c_str());
         return {};
     }
 
@@ -597,6 +666,11 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL* ssl1){
     for (int i = packetBuffer.size()-1; i >= packetBuffer.size() - 4; --i) {
         payloadLength = (payloadLength << 8) | packetBuffer[i];
     }
+
+    if(payloadLength == 0){
+        return packetBuffer;
+    }
+
     packetBuffer.resize(packetBuffer.size() + payloadLength);
 
     total = TcpServer::Recv(packetBuffer,headerLength + 4 + payloadLength,total,ssl1);

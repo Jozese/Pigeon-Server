@@ -93,14 +93,14 @@ namespace PigeonServerGUI{
 
         t += ImGui::GetIO().DeltaTime;
 
-        buffer.AddPoint(t,*sent);
+        buffer.AddPoint(t,(*sent/1000));
 
         if (ImPlot::BeginPlot("Bytes Sent",ImVec2(-1,175))) {
             ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
-            ImPlot::SetupAxisLimits(ImAxis_X1,t-5, t, ImGuiCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1,0,300);
+            ImPlot::SetupAxisLimits(ImAxis_X1,t-30, t, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1,-1,2000);
 
-            ImPlot::PlotLine("Bytes", &buffer.Data[0].x, &buffer.Data[0].y, buffer.Data.size(), 0, buffer.Offset, 2 * sizeof(int));
+            ImPlot::PlotLine("KB", &buffer.Data[0].x, &buffer.Data[0].y, buffer.Data.size(), 0, buffer.Offset, 2 * sizeof(int));
 
             // End plot
             ImPlot::EndPlot();
@@ -118,14 +118,14 @@ namespace PigeonServerGUI{
 
         t += ImGui::GetIO().DeltaTime;
 
-        buffer.AddPoint(t,*data);
+        buffer.AddPoint(t,(*data/1000));
 
         if (ImPlot::BeginPlot("Bytes Recv",ImVec2(-1,175))) {
             ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
-            ImPlot::SetupAxisLimits(ImAxis_X1,t-5, t, ImGuiCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1,0,300);
+            ImPlot::SetupAxisLimits(ImAxis_X1,t-30, t, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1,-1,2000);
 
-            ImPlot::PlotLine("Bytes", &buffer.Data[0].x, &buffer.Data[0].y, buffer.Data.size(), 0, buffer.Offset, 2 * sizeof(float));
+            ImPlot::PlotLine("KB", &buffer.Data[0].x, &buffer.Data[0].y, buffer.Data.size(), 0, buffer.Offset, 2 * sizeof(float));
 
             // End plot
             ImPlot::EndPlot();

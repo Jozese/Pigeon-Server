@@ -173,7 +173,11 @@ public:
 
 private:
     std::string serverName = "";
-    std::mutex mapMutex;
+
+    //mutexes for send and recvd bytes, could also use atomics
+    std::mutex recvMutex;
+    std::mutex sentMutex;
+
     bool isLocked = false;
     ImGuiLog* log = nullptr;
 
