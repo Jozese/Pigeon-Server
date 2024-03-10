@@ -463,9 +463,9 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
                     break;
                 }
                 auto contentBuffer = String::StringToBytes(B64::base64_decode(fileContent));
-                bool err = File::BufferToDisk(recv.PAYLOAD, ("Files/" + it->second->username + "_" + fileName + ".json"));
+                bool err = File::BufferToDisk(recv.PAYLOAD, ("Files/" + fileName + ".json"));
 
-                newPacket = BuildPacket(MEDIA_FILE,recv.HEADER.username,String::StringToBytes(R"({"filename":")" + it->second->username + "_" + fileName + R"("})"));
+                newPacket = BuildPacket(MEDIA_FILE,recv.HEADER.username,String::StringToBytes(R"({"filename":")" + fileName + R"("})"));
 
             }else{
                 newPacket = BuildPacket(USERNAME_MISMATCH, recv.HEADER.username,{});
@@ -521,13 +521,14 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket& recv, int clientFD){
                 }
             
 
-            auto buffer = File::DiskToBuffer("Files/"+filename);
+            auto buffer = File::DiskToBuffer("Files/"+filename+".json");
+
             if(buffer.empty()){
                 log->AddLog((GetDate() + " [ERR] FILE NOT FOUND: " + recv.HEADER.username + "\n").c_str());
                 newPacket = BuildPacket(FILE_NOT_FOUND, recv.HEADER.username,{});
                 break;
             }
-
+            
             newPacket = BuildPacket(ACK_MEDIA_DOWNLOAD, recv.HEADER.username,buffer);
 
         }
