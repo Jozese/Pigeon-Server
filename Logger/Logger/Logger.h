@@ -3,13 +3,15 @@
 //
 
 #pragma once
-
 #include <iostream>
 #include <queue>
 #include <thread>
 #include <mutex>
 #include <condition_variable>
 #include <ctime>
+#include <sstream>
+
+#include "Colors.h"
 
 enum LogTypes{
     INFO,
@@ -26,11 +28,6 @@ public:
     void runLogger();
     void log(LogTypes type, std::string&& logMessage);
     std::string GetTime();
-
-    std::thread& GetThread(){
-        return this->logThread;
-    };
-
 private:
     struct Log{
         LogTypes type;
@@ -48,5 +45,3 @@ private:
 
 
 };
-
-

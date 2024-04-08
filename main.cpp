@@ -8,35 +8,57 @@
 
 int main(int argc, char* argv[])
 {
-   if(PigeonServerGUI::CreateWindow() != 0)
-   {
-      std::cerr << "Error to create SDL window " << std::endl;
+   Logger* logger = new Logger();
+
+   //fix
+   bool shouldDelete = false;
+
+   if(strcmp(argv[1],"--headless") == 0){
+
+        static std::string serverName = "PGN-EU-1";
+        static std::string serverPort = "4444";
+        static std::string certPath = "cert.pem";
+        static std::string keyPath = "key.pem";
+
+      PigeonServer *server = new PigeonServer(certPath,keyPath,serverName,std::stoi(serverPort),nullptr,logger);
+      server->Run(shouldDelete);
+      delete server;
    }
+   else{
 
-   PigeonServerGUI::SetUpImGui();
-   
+      PigeonServerGUI::logger = logger;
 
-   while (!PigeonServerGUI::shouldClose)
-   {
-
-
-      while (SDL_PollEvent(&PigeonServerGUI::currentEvent))
+      if(PigeonServerGUI::CreateWindow() != 0)
       {
-         ImGui_ImplSDL2_ProcessEvent(&PigeonServerGUI::currentEvent);
-         if (PigeonServerGUI::currentEvent.type == SDL_QUIT)
-         {
-            PigeonServerGUI::shouldClose = true;
-         }  
+         std::cerr << "Error to create SDL window " << std::endl;
       }
-      PigeonServerGUI::StartImGuiFrame();
+
+      PigeonServerGUI::SetUpImGui();
       
-      PigeonServerGUI::MainWindow();
 
-      PigeonServerGUI::RenderTabBar();
+      while (!PigeonServerGUI::shouldClose)
+      {
 
-      PigeonServerGUI::Render();
+
+         while (SDL_PollEvent(&PigeonServerGUI::currentEvent))
+         {
+            ImGui_ImplSDL2_ProcessEvent(&PigeonServerGUI::currentEvent);
+            if (PigeonServerGUI::currentEvent.type == SDL_QUIT)
+            {
+               PigeonServerGUI::shouldClose = true;
+            }
+         }
+         PigeonServerGUI::StartImGuiFrame();
+         
+         PigeonServerGUI::MainWindow();
+
+         PigeonServerGUI::RenderTabBar();
+
+         PigeonServerGUI::Render();
+      }
+
+      PigeonServerGUI::Cleanup();
    }
-
-   PigeonServerGUI::Cleanup();
+   delete logger;
    return 0;
 }

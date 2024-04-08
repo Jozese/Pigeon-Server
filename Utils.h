@@ -43,6 +43,15 @@ namespace String {
     static std::vector<unsigned char> StringToBytes(const std::string& str){
         return std::vector<unsigned char>(str.begin(), str.end());
     }
+    static std::string HexToString(const std::vector<unsigned char>& bytes) {
+    
+        std::stringstream ss;
+
+        for (const unsigned char& byte : bytes) {
+            ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte) << " " << std::dec;
+        }
+        return ss.str();
+    }
 }
 
 /* Not my implementation */

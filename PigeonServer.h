@@ -38,6 +38,7 @@
 #include "PigeonPacket.h"
 #include "PigeonServerGUI/ImGuiLogger.h"
 #include "Utils.h"
+#include "Logger/Logger/Logger.h"
 #include <thread>
 
 enum Status{
@@ -61,13 +62,6 @@ struct Client{
     Client():clientSsl(nullptr), logTimestamp(std::time(0)), username(""), status(ONLINE), ipv4(""){};
 };
 
-//UTILS
-static void printBytesInHex(const std::vector<unsigned char>& bytes) {
-    for (const unsigned char& byte : bytes) {
-        std::cout << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte) << " " << std::dec;
-    }
-    std::cout << std::endl;
-}
 
 
 
@@ -80,7 +74,7 @@ static void printBytesInHex(const std::vector<unsigned char>& bytes) {
 class PigeonServer: public TcpServer{
 
 public:
-    PigeonServer(const std::string& certPath, const std::string& keyPath, const std::string& serverName, unsigned short port, ImGuiLog* log);
+    PigeonServer(const std::string& certPath, const std::string& keyPath, const std::string& serverName, unsigned short port, ImGuiLog* log, Logger* logger);
     ~PigeonServer(){
         log->AddLog((GetDate() + " [INFO] DELETING SERVER \n").c_str());
         for(auto& p : *clients){
@@ -180,6 +174,7 @@ private:
 
     bool isLocked = false;
     ImGuiLog* log = nullptr;
+    Logger* logger = nullptr;
 
 private:
     std::unordered_map<int,Client*>* clients;

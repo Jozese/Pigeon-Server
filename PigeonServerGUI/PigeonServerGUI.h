@@ -54,6 +54,7 @@ namespace PigeonServerGUI{
      bool shouldDelete = false;
 
     static bool shouldLog = false;
+    Logger* logger = nullptr;
 
     ImGuiLog* log = nullptr;
 
@@ -199,9 +200,9 @@ namespace PigeonServerGUI{
 
 
         if(ImGui::Button("Create Server")){
-            if(server == nullptr){
+            if(server == nullptr || logger != nullptr){
                 log = new ImGuiLog();
-                server = new PigeonServer(certPath,keyPath,serverName, std::stoi(serverPort), log);
+                server = new PigeonServer(certPath,keyPath,serverName, std::stoi(serverPort), log, logger);
                 std::thread([&]{
                     server->Run(shouldDelete);                    
                 }).detach();

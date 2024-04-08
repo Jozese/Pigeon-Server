@@ -1,3 +1,5 @@
+
+
 #include "Logger.h"
 
 Logger::Logger() {
@@ -29,18 +31,27 @@ void Logger::runLogger() {
         Log log = logQueue.front();
         logQueue.pop();
 
+        std::stringstream ss;
+
         switch (log.type) {
             case INFO:
-                std::cout << GetTime() << "[INFO] " << log.logMessage << std::endl;
+                ss << GetTime() << " [INFO] " << " " << log.logMessage;
+                std::cout << Bold(Color(ss.str(),KCYN,"")) << std::endl;
                 break;
+
             case DEBUG:
-                std::cout << GetTime() << "[DEBUG] " << log.logMessage << std::endl;
+                ss << GetTime() << " [DEBUG] " << log.logMessage ;
+                std::cout << Bold(Color(ss.str(),KMAG,"")) << std::endl;
                 break;
+
             case WARNING:
-                std::cout << GetTime() << "[WARNING] " << log.logMessage << std::endl;
+                ss << GetTime() << " [WARN] " << " " << log.logMessage ;
+                std::cout << Bold(Color(ss.str(),KYEL,"")) << std::endl;
                 break;
+
             case ERROR:
-                std::cerr << GetTime() << "[ERROR] " << log.logMessage << std::endl;
+                ss << GetTime() << " [ERROR] " << log.logMessage ;
+                std::cout << Bold(Color(ss.str(),KRED,"")) << std::endl;
                 break;
         }
 
@@ -50,6 +61,5 @@ void Logger::runLogger() {
 
 Logger::~Logger(){
     isRunning = false;
-    if(logThread.joinable())
-        logThread.join();
+    logThread.join();
 }

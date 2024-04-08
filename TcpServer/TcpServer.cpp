@@ -6,11 +6,12 @@ TcpServer::TcpServer(const std::string& cert, const std::string& privateKey, uns
 privateKey(privateKey), port(port){
 
     //Need to check if sucess
-    this->sslCtx = SSL_CTX_new(TLSv1_2_server_method());
+    this->sslCtx = SSL_CTX_new(TLS_server_method());
     
 }
 
 int TcpServer::SocketSetup(){
+
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
