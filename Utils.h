@@ -44,14 +44,26 @@ namespace String {
         return std::vector<unsigned char>(str.begin(), str.end());
     }
     static std::string HexToString(const std::vector<unsigned char>& bytes) {
-    
-        std::stringstream ss;
+    std::stringstream ss;
+    ss << "\n\n0000: ";
 
-        for (const unsigned char& byte : bytes) {
-            ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte) << " " << std::dec;
+    int count = 0;
+    for (const unsigned char& byte : bytes) {
+        if (count % 16 == 0 && count != 0) {
+            ss << std::setw(4) << std::setfill('0') << std::hex << static_cast<int>(count) << std::dec << ": ";
         }
-        return ss.str();
+
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte) << " ";
+
+        count++;
+        if (count % 16 == 0) {
+            ss << "\n";
+        }
     }
+    
+    ss << "\n";
+    return ss.str();
+}
 }
 
 /* Not my implementation */

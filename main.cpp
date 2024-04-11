@@ -8,6 +8,8 @@
 
 int main(int argc, char* argv[])
 {
+   system("clear");
+
    Logger* logger = new Logger();
 
    //fix
