@@ -6,31 +6,38 @@
 #include <sstream>
 #include <vector>
 
-namespace File{
-    static bool BufferToDisk(const std::vector<unsigned char>& buffer, const std::string& filename){
+namespace File
+{
+    static bool BufferToDisk(const std::vector<unsigned char> &buffer, const std::string &filename)
+    {
         std::ofstream outfile(filename, std::ios::out | std::ios::binary);
 
-        if (outfile.is_open()) {
-            outfile.write(reinterpret_cast<const char*>(buffer.data()), buffer.size());
+        if (outfile.is_open())
+        {
+            outfile.write(reinterpret_cast<const char *>(buffer.data()), buffer.size());
             outfile.close();
-        } else {
+        }
+        else
+        {
             return false;
         }
         return true;
     }
 
-    static std::vector<unsigned char> DiskToBuffer(const std::string& filename) {
+    static std::vector<unsigned char> DiskToBuffer(const std::string &filename)
+    {
         std::vector<unsigned char> buffer;
         std::ifstream infile(filename, std::ios::in | std::ios::binary);
 
-        if (infile.is_open()) {
+        if (infile.is_open())
+        {
             infile.seekg(0, std::ios::end);
             std::streampos fileSize = infile.tellg();
             infile.seekg(0, std::ios::beg);
 
             buffer.resize(fileSize);
 
-            infile.read(reinterpret_cast<char*>(buffer.data()), fileSize);
+            infile.read(reinterpret_cast<char *>(buffer.data()), fileSize);
 
             infile.close();
         }
@@ -39,70 +46,87 @@ namespace File{
     }
 }
 
-namespace String {
-    static std::vector<unsigned char> StringToBytes(const std::string& str){
+namespace String
+{
+    static std::vector<unsigned char> StringToBytes(const std::string &str)
+    {
         return std::vector<unsigned char>(str.begin(), str.end());
     }
-    static std::string HexToString(const std::vector<unsigned char>& bytes) {
-    std::stringstream ss;
-    ss << "\n\n0000: ";
+    static std::string HexToString(const std::vector<unsigned char> &bytes)
+    {
+        std::stringstream ss;
+        ss << "\n\n0000: ";
 
-    int count = 0;
-    for (const unsigned char& byte : bytes) {
-        if (count % 16 == 0 && count != 0) {
-            ss << std::setw(4) << std::setfill('0') << std::hex << static_cast<int>(count) << std::dec << ": ";
+        int count = 0;
+        for (const unsigned char &byte : bytes)
+        {
+            if (count % 16 == 0 && count != 0)
+            {
+                ss << std::setw(4) << std::setfill('0') << std::hex << static_cast<int>(count) << std::dec << ": ";
+            }
+
+            ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte) << " ";
+
+            count++;
+            if (count % 16 == 0)
+            {
+                ss << "\n";
+            }
         }
 
-        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(byte) << " ";
-
-        count++;
-        if (count % 16 == 0) {
-            ss << "\n";
-        }
+        ss << "\n";
+        return ss.str();
     }
-    
-    ss << "\n";
-    return ss.str();
-}
 }
 
 /* Not my implementation */
-namespace B64 {
-        static std::string base64_encode(const std::string& in) {
+namespace B64
+{
+    static std::string base64_encode(const std::string &in)
+    {
 
-            std::string out;
+        std::string out;
 
-            int val = 0, valb = -6;
-            for (unsigned char c : in) {
-                val = (val << 8) + c;
-                valb += 8;
-                while (valb >= 0) {
-                    out.push_back("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[(val >> valb) & 0x3F]);
-                    valb -= 6;
-                }
+        int val = 0, valb = -6;
+        for (unsigned char c : in)
+        {
+            val = (val << 8) + c;
+            valb += 8;
+            while (valb >= 0)
+            {
+                out.push_back("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[(val >> valb) & 0x3F]);
+                valb -= 6;
             }
-            if (valb > -6) out.push_back("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[((val << 8) >> (valb + 8)) & 0x3F]);
-            while (out.size() % 4) out.push_back('=');
-            return out;
         }
-
-        static std::string base64_decode(const std::string& in) {
-
-            std::string out;
-
-            std::vector<int> T(256, -1);
-            for (int i = 0; i < 64; i++) T["ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[i]] = i;
-
-            int val = 0, valb = -8;
-            for (unsigned char c : in) {
-                if (T[c] == -1) break;
-                val = (val << 6) + T[c];
-                valb += 6;
-                if (valb >= 0) {
-                    out.push_back(char((val >> valb) & 0xFF));
-                    valb -= 8;
-                }
-            }
-            return out;
-        }
+        if (valb > -6)
+            out.push_back("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[((val << 8) >> (valb + 8)) & 0x3F]);
+        while (out.size() % 4)
+            out.push_back('=');
+        return out;
     }
+
+    static std::string base64_decode(const std::string &in)
+    {
+
+        std::string out;
+
+        std::vector<int> T(256, -1);
+        for (int i = 0; i < 64; i++)
+            T["ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"[i]] = i;
+
+        int val = 0, valb = -8;
+        for (unsigned char c : in)
+        {
+            if (T[c] == -1)
+                break;
+            val = (val << 6) + T[c];
+            valb += 6;
+            if (valb >= 0)
+            {
+                out.push_back(char((val >> valb) & 0xFF));
+                valb -= 8;
+            }
+        }
+        return out;
+    }
+}
