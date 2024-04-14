@@ -22,7 +22,8 @@ PigeonServer::PigeonServer(const std::string &certPath, const std::string &keyPa
 
     if (TcpServer::Setup() != 0)
     {
-        throw std::string("[ERROR] PigeonServer::PigeonServer Error while setting up tcp server");
+        logger->log(ERROR, "Error while setting up tcp server");
+        exit(EXIT_FAILURE);
     }
 };
 
