@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include "PigeonData.h"
+
 #include <iostream>
 #include <string>
 #include <vector>
@@ -69,6 +71,7 @@ class PigeonServer : public TcpServer
 {
 
 public:
+    PigeonServer(PigeonData& data,ImGuiLog *log, Logger *logger);
     PigeonServer(const std::string &certPath, const std::string &keyPath, const std::string &serverName, unsigned short port, ImGuiLog *log, Logger *logger);
     ~PigeonServer()
     {

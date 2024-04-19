@@ -27,6 +27,32 @@ PigeonServer::PigeonServer(const std::string &certPath, const std::string &keyPa
     }
 };
 
+
+PigeonServer::PigeonServer(PigeonData& data,ImGuiLog *log, Logger *logger):
+    TcpServer(data.GetData()["cert"].asString(),data.GetData()["key"].asString(),(unsigned short)data.GetData()["port"].asInt()),
+    serverName(data.GetData()["serverName"].asString()),
+    log(log),
+    logger(logger)
+
+{
+    clients = new std::unordered_map<int, Client *>();
+    this->bytesRecv = new double(0);
+    this->bytesSent = new double(0);
+
+    if (log != nullptr)
+        log->AddLog((GetDate() + " [INFO] Setting up TCP server\n").c_str());
+
+    logger->log(DEBUG, "Setting up TCP server");
+
+    if (TcpServer::Setup() != 0)
+    {
+        logger->log(ERROR, "Error while setting up tcp server");
+        exit(EXIT_FAILURE);
+    }
+
+}
+
+
 /**
  * @brief Runs the Pigeon server.
  * @param shouldDelete Boolean reference indicating if the server should be deleted.

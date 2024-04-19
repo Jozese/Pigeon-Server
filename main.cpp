@@ -3,6 +3,7 @@
 #include "ImGui/imgui_impl_sdl2.h"
 #include "ImGui/imgui_impl_opengl3.h"
 #include <GL/glew.h>
+#include "PigeonData.h"
 
 #include "PigeonServerGUI/PigeonServerGUI.h"
 
@@ -17,6 +18,7 @@ int main(int argc, char *argv[])
 
    if (strcmp(argv[1], "--headless") == 0)
    {
+      /*
       Json::Reader reader;
       Json::Value value;
 
@@ -42,8 +44,11 @@ int main(int argc, char *argv[])
       }
 
       // No need to check other vars since the tcp server wont start if any value is not correct
+      */
 
-      PigeonServer *server = new PigeonServer(certPath, keyPath, serverName, std::stoi(serverPort), nullptr, logger);
+      PigeonData data("config.json");
+
+      PigeonServer *server = new PigeonServer(data, nullptr, logger);
       server->Run(shouldDelete);
       delete server;
    }
