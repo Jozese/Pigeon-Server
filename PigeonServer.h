@@ -181,6 +181,8 @@ private:
     ImGuiLog *log = nullptr;
     Logger *logger = nullptr;
 
+    PigeonData* m_data = nullptr;
+
 private:
     std::unordered_map<int, Client *> *clients;
     std::vector<std::thread> threadPool;

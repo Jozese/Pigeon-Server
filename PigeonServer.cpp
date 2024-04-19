@@ -23,7 +23,7 @@ PigeonServer::PigeonServer(const std::string &certPath, const std::string &keyPa
     if (TcpServer::Setup() != 0)
     {
         logger->log(ERROR, "Error while setting up tcp server");
-        exit(EXIT_FAILURE);
+        exit(EXIT_FAILURE );
     }
 };
 
@@ -32,8 +32,8 @@ PigeonServer::PigeonServer(PigeonData& data,ImGuiLog *log, Logger *logger):
     TcpServer(data.GetData()["cert"].asString(),data.GetData()["key"].asString(),(unsigned short)data.GetData()["port"].asInt()),
     serverName(data.GetData()["serverName"].asString()),
     log(log),
-    logger(logger)
-
+    logger(logger),
+    m_data(&data)
 {
     clients = new std::unordered_map<int, Client *>();
     this->bytesRecv = new double(0);
@@ -246,7 +246,7 @@ void PigeonServer::Run(bool &shouldDelete)
                         }
 
                         //bad packet, close connection and notify all clients
-                        if(toSend.HEADER.OPCODE == USER_COLLISION || toSend.HEADER.OPCODE == LENGTH_EXCEEDED || toSend.HEADER.OPCODE == JSON_NOT_VALID || toSend.HEADER.OPCODE == RATE_LIMITED || toSend.HEADER.OPCODE == FILE_NOT_FOUND || toSend.HEADER.OPCODE == USERNAME_MISMATCH){
+                        if(toSend.HEADER.OPCODE & 0xF0 == 0xE0){
                             if(clients->find(latestClientIter.first->first) != clients->end()){
 
                                 if(log != nullptr)                                
@@ -326,6 +326,9 @@ std::vector<unsigned char> PigeonServer::SerializePacket(const PigeonPacket &pac
  */
 PigeonPacket PigeonServer::DeserializePacket(std::vector<unsigned char> &packet)
 {
+    if(packet.empty())
+        return PigeonPacket();
+
     PigeonPacket packetRet;
 
     int offset = 0;
@@ -396,7 +399,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
     case CLIENT_HELLO:
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
-            newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + this->serverName + R"("})"));
+            newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + this->serverName + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() + R"("})"));
 
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
