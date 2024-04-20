@@ -18,6 +18,7 @@ enum LogTypes{
     DEBUG,
     WARNING,
     ERROR,
+    DEBUG_DOWNLOAD,
 
 };
 

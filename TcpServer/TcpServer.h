@@ -20,6 +20,7 @@
 
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#include "../Logger/Logger/Logger.h"
 
 class TcpServer{
 public:
@@ -29,7 +30,7 @@ public:
     int CtxConfig();
     int Setup();
 
-    int Recv(std::vector<unsigned char>& buf, size_t toRecv, int total=0, SSL* ssl=nullptr);
+    int Recv(std::vector<unsigned char>& buf, size_t toRecv, int total=0, SSL* ssl=nullptr, Logger* logger = nullptr);
     int SendAll(std::vector<unsigned char>& buf, SSL* ssl);
 public:
     inline int GetSocketFD(){ return sSocket;};

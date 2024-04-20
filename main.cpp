@@ -18,34 +18,7 @@ int main(int argc, char *argv[])
 
    if (strcmp(argv[1], "--headless") == 0)
    {
-      /*
-      Json::Reader reader;
-      Json::Value value;
-
-      auto file = File::DiskToBuffer("config.json");
-      if(file.empty()){
-         logger->log(ERROR, "config.json does not exist");
-         return EXIT_FAILURE;
-      }
-
-      if (!reader.parse(std::string(file.begin(), file.end()), value))      {
-         logger->log(ERROR, "config.json contains invalid json");
-         return EXIT_FAILURE;
-      }
-
-      static std::string serverName = value["servername"].asString();
-      static std::string serverPort = value["port"].asString();
-      static std::string certPath = value["cert"].asString();
-      static std::string keyPath = value["key"].asString();
-
-      if(serverName.empty()){
-         logger->log(ERROR, "servername cannot be empty");
-         return EXIT_FAILURE;
-      }
-
-      // No need to check other vars since the tcp server wont start if any value is not correct
-      */
-
+            
       PigeonData data("config.json");
 
       PigeonServer *server = new PigeonServer(data, nullptr, logger);

@@ -152,7 +152,8 @@ void PigeonServer::Run(bool &shouldDelete)
 
                         std::vector<unsigned char> a = ReadPacket(latestClientIter.first->second->clientSsl);
 
-                        logger->log(DEBUG, "NEW PKT: " + String::HexToString(a));
+                        if(m_data->GetData()["LogPkt"].asBool())
+                            logger->log(DEBUG, "NEW PKT: " + String::HexToString(a));
 
 
                         if(!a.empty() && bytesRecv != nullptr){
@@ -399,8 +400,9 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
     case CLIENT_HELLO:
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
-            newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + this->serverName + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() + R"("})"));
+            newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + m_data->GetData()["servername"].asString() + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() + R"("})"));
 
+            //Kinda pointless since we check previously when readin the packet fix later
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
 
@@ -536,7 +538,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
             if (it->second->username == recv.HEADER.username)
             {
 
-                if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
+                if (recv.PAYLOAD.size() > m_data->GetData()["sizelimit"].asInt() * 1000 * 1000)
                 {
                     if (log != nullptr)
                         log->AddLog((GetDate() + " [ERR] MEDIA FILE TOO BIG: " + recv.HEADER.username + "\n").c_str());
@@ -546,7 +548,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                     break;
                 }
 
-                if (std::time(0) - it->second->logTimestamp < 15)
+                if (std::time(0) - it->second->logTimestamp < m_data->GetData()["ratelimit"].asInt())
                 {
                     newPacket = BuildPacket(RATE_LIMITED, recv.HEADER.username, {});
                     if (log != nullptr)
@@ -621,6 +623,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 break;
             }
 
+            //Also kinda pointless
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
                 if (log != nullptr)
@@ -735,6 +738,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
             logger->log(INFO, "NEW PRESENCE UPDATE REQUEST BY: " + recv.HEADER.username);
 
+            //Pointless
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
                 log->AddLog((GetDate() + " [ERR] MESSAGE TOO BIG: " + recv.HEADER.username + "\n").c_str());
@@ -812,9 +816,9 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
     }
 
     int headerLength = 0;
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < 4; i++)
     {
-        headerLength |= packetBuffer[i] << (8 * i);
+        headerLength += packetBuffer[i] << (8 * i);
     }
 
     if (headerLength > MAX_HEADER)
@@ -835,15 +839,15 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
     {
         payloadLength = (payloadLength << 8) | packetBuffer[i];
     }
-
-    if (payloadLength == 0)
+    
+    if (payloadLength == 0 || payloadLength >= 256 * 1000 * 1000)
     {
         return packetBuffer;
     }
 
     packetBuffer.resize(packetBuffer.size() + payloadLength);
 
-    total = TcpServer::Recv(packetBuffer, headerLength + 4 + payloadLength, total, ssl1);
+    total = TcpServer::Recv(packetBuffer, headerLength + 4 + payloadLength, total, ssl1, this->logger);
 
     return packetBuffer;
 }

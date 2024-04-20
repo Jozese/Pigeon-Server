@@ -68,16 +68,26 @@ int TcpServer::Setup(){
     return 0;
 }
 
-int TcpServer::Recv(std::vector<unsigned char>& buf, size_t toRecv, int total, SSL* ssl1){
+int TcpServer::Recv(std::vector<unsigned char>& buf, size_t toRecv, int total, SSL* ssl1, Logger* logger){
+
+    if(logger)
+        logger->log(DEBUG, "DOWNLOADING PAYLOAD");
 
     do{
         int nRecv = SSL_read(ssl1, buf.data() + total, toRecv - total);
+        
+        if(logger)
+            logger->log(DEBUG_DOWNLOAD, std::to_string(total) + " BYTES / " + std::to_string(toRecv) + " BYTES");
+
         if(nRecv <= 0)
             break;
         total += nRecv;
 
     }while (total < toRecv);
     
+    if(logger)
+            logger->log(DEBUG, std::to_string(total) + " BYTES / " + std::to_string(toRecv) + " BYTES");
+
     return total;
 }
 
