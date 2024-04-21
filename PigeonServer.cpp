@@ -23,17 +23,15 @@ PigeonServer::PigeonServer(const std::string &certPath, const std::string &keyPa
     if (TcpServer::Setup() != 0)
     {
         logger->log(ERROR, "Error while setting up tcp server");
-        exit(EXIT_FAILURE );
+        exit(EXIT_FAILURE);
     }
 };
 
-
-PigeonServer::PigeonServer(PigeonData& data,ImGuiLog *log, Logger *logger):
-    TcpServer(data.GetData()["cert"].asString(),data.GetData()["key"].asString(),(unsigned short)data.GetData()["port"].asInt()),
-    serverName(data.GetData()["serverName"].asString()),
-    log(log),
-    logger(logger),
-    m_data(&data)
+PigeonServer::PigeonServer(PigeonData &data, ImGuiLog *log, Logger *logger) : TcpServer(data.GetData()["cert"].asString(), data.GetData()["key"].asString(), (unsigned short)data.GetData()["port"].asInt()),
+                                                                              serverName(data.GetData()["serverName"].asString()),
+                                                                              log(log),
+                                                                              logger(logger),
+                                                                              m_data(&data)
 {
     clients = new std::unordered_map<int, Client *>();
     this->bytesRecv = new double(0);
@@ -49,9 +47,7 @@ PigeonServer::PigeonServer(PigeonData& data,ImGuiLog *log, Logger *logger):
         logger->log(ERROR, "Error while setting up tcp server");
         exit(EXIT_FAILURE);
     }
-
 }
-
 
 /**
  * @brief Runs the Pigeon server.
@@ -247,7 +243,7 @@ void PigeonServer::Run(bool &shouldDelete)
                         }
 
                         //bad packet, close connection and notify all clients
-                        if(toSend.HEADER.OPCODE & 0xF0 == 0xE0){
+                        if((toSend.HEADER.OPCODE & 0xF0) == 0xE0){
                             if(clients->find(latestClientIter.first->first) != clients->end()){
 
                                 if(log != nullptr)                                
@@ -327,7 +323,7 @@ std::vector<unsigned char> PigeonServer::SerializePacket(const PigeonPacket &pac
  */
 PigeonPacket PigeonServer::DeserializePacket(std::vector<unsigned char> &packet)
 {
-    if(packet.empty())
+    if (packet.empty())
         return PigeonPacket();
 
     PigeonPacket packetRet;
@@ -402,7 +398,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
         {
             newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + m_data->GetData()["servername"].asString() + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() + R"("})"));
 
-            //Kinda pointless since we check previously when readin the packet fix later
+            // Kinda pointless since we check previously when readin the packet fix later
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
 
@@ -623,7 +619,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 break;
             }
 
-            //Also kinda pointless
+            // Also kinda pointless
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
                 if (log != nullptr)
@@ -738,7 +734,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
             logger->log(INFO, "NEW PRESENCE UPDATE REQUEST BY: " + recv.HEADER.username);
 
-            //Pointless
+            // Pointless
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
                 log->AddLog((GetDate() + " [ERR] MESSAGE TOO BIG: " + recv.HEADER.username + "\n").c_str());
@@ -807,6 +803,8 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
 {
     std::vector<unsigned char> packetBuffer(MAX_HEADER);
 
+    // 15 00 00 00
+
     int total = TcpServer::Recv(packetBuffer, 4, 0, ssl1);
 
     // This could also mean error when receving. In case of error/wrong packet, empty vector is returned and the connection will be closed
@@ -815,10 +813,19 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
         return {};
     }
 
+    // HUGE bug here when trying to recv huge files
     int headerLength = 0;
+
+    /*headerLength += packetBuffer[0] << (8 * 0);
+    headerLength += packetBuffer[1] << (8 * 1);
+    headerLength += packetBuffer[2] << (8 * 2);
+    headerLength += packetBuffer[3] << (8 * 3);
+    */
     for (int i = 0; i < 4; i++)
     {
+        
         headerLength += packetBuffer[i] << (8 * i);
+
     }
 
     if (headerLength > MAX_HEADER)
@@ -832,15 +839,16 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
 
     total = TcpServer::Recv(packetBuffer, headerLength + 4, total, ssl1);
 
+
     packetBuffer.resize(total);
 
-    int payloadLength = 0;
+    long long payloadLength = 0;
     for (int i = packetBuffer.size() - 1; i >= packetBuffer.size() - 4; --i)
     {
         payloadLength = (payloadLength << 8) | packetBuffer[i];
     }
-    
-    if (payloadLength == 0 || payloadLength >= 256 * 1000 * 1000)
+
+    if (payloadLength == 0)
     {
         return packetBuffer;
     }
