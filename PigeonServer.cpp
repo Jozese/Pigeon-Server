@@ -396,7 +396,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
     case CLIENT_HELLO:
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
-            newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + m_data->GetData()["servername"].asString() + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() + R"("})"));
+            newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + m_data->GetData()["servername"].asString() + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() +  + R"(","sizelimit":)" + std::to_string(m_data->GetData()["sizelimit"].asInt()) + R"(})"));
 
             // Kinda pointless since we check previously when readin the packet fix later
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
@@ -575,7 +575,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
                 // std::cout << fileExt << fileName << std::endl;
 
-                if (fileContent == "" || fileExt == "" || fileName == "")
+                if (fileContent == "" || fileName == "")
                 {
                     if (log != nullptr)
                         log->AddLog((GetDate() + " [ERR] MALFORMED MEDIA PACKET: " + recv.HEADER.username + "\n").c_str());
@@ -585,9 +585,9 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                     break;
                 }
                 auto contentBuffer = String::StringToBytes(B64::base64_decode(fileContent));
-                bool err = File::BufferToDisk(recv.PAYLOAD, ("Files/" + fileName + ".json"));
+                bool err = File::BufferToDisk(recv.PAYLOAD, ("Files/" + std::to_string(std::time(0)) + "_" + fileName + ".json"));
 
-                newPacket = BuildPacket(MEDIA_FILE, recv.HEADER.username, String::StringToBytes(R"({"filename":")" + fileName + R"("})"));
+                    newPacket = BuildPacket(MEDIA_FILE, recv.HEADER.username, String::StringToBytes(R"({"filename":")" + fileName + R"(", "ext":")" + fileExt + R"("})"));             
             }
             else
             {
