@@ -1,2 +1,2 @@
 #!/bin/bash
-g++ -o ./bin/server.out -I/usr/include/SDL2 ImGui/*.cpp TcpServer/*.cpp Logger/Logger/*.cpp PigeonData.cpp PigeonServer.cpp main.cpp -lssl -ljsoncpp -lcrypto -lSDL2 -lGLEW -lGL -ldl -std=c++20
+g++ -o ./bin/server.out TcpServer/*.cpp Logger/Logger/*.cpp src/PigeonData.cpp src/PigeonServer.cpp src/main.cpp -lssl -ljsoncpp -lcrypto -std=c++20

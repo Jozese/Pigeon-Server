@@ -32,11 +32,10 @@
 #include <openssl/err.h>
 #include <jsoncpp/json/json.h>
 
-#include "TcpServer/TcpServer.h"
+#include "../TcpServer/TcpServer.h"
 #include "PigeonPacket.h"
-#include "PigeonServerGUI/ImGuiLogger.h"
 #include "Utils.h"
-#include "Logger/Logger/Logger.h"
+#include "../Logger/Logger/Logger.h"
 #include <thread>
 
 enum Status
@@ -71,33 +70,23 @@ class PigeonServer : public TcpServer
 {
 
 public:
-    PigeonServer(PigeonData& data,ImGuiLog *log, Logger *logger);
-    PigeonServer(const std::string &certPath, const std::string &keyPath, const std::string &serverName, unsigned short port, ImGuiLog *log, Logger *logger);
+    PigeonServer(PigeonData& data, Logger *logger);
+    PigeonServer(const std::string &certPath, const std::string &keyPath, const std::string &serverName, unsigned short port, Logger *logger);
     ~PigeonServer()
     {
-        log->AddLog((GetDate() + " [INFO] DELETING SERVER \n").c_str());
         for (auto &p : *clients)
         {
             SSL_shutdown(p.second->clientSsl);
             close(p.first);
-            log->AddLog((GetDate() + " [FREE] FREED CLIENT FD: " + std::to_string(p.first) + "\n").c_str());
         }
 
-        log->Clear();
 
         delete clients;
-        delete bytesRecv;
-        delete bytesSent;
-        delete log;
-
-        bytesRecv = nullptr;
-        bytesSent = nullptr;
         clients = nullptr;
-        log = nullptr;
     };
 
 public:
-    void Run(bool &shouldDelete);
+    void Run();
 
     std::vector<unsigned char> ReadPacket(SSL *ssl1);
     PigeonPacket ProcessPacket(PigeonPacket &recv, int clientFD);
@@ -107,7 +96,9 @@ public:
 
     PigeonPacket BuildPacket(PIGEON_OPCODE opcode, const std::string &username, const std::vector<unsigned char> &payload);
 
-    void *BroadcastPacket(const PigeonPacket &packet);
+    void* BroadcastPacket(const PigeonPacket &packet);
+
+    void NotifyNewPresence();
 
     // UTILS
 public:
@@ -130,8 +121,11 @@ public:
         return time;
     }
 
+    //Need mutex
     inline void FreeClient(int c, SSL *cSSL)
     {
+        std::lock_guard<std::mutex> lock(this->m_clientsMtx);
+
         shutdown(c, SHUT_RDWR);
         close(c);
         auto it = clients->find(c);
@@ -141,6 +135,7 @@ public:
             clients->erase(it);
         }
         SSL_free(cSSL);
+        
     };
 
     inline void DisconnectClient(SSL *cSSL)
@@ -160,30 +155,20 @@ public:
         return false;
     }
 
+    //Not really used
     inline bool isBase64(const std::string &str)
     {
         std::regex b64Pattern("^(?:[A-Za-z0-9+\\/]{4})*(?:[A-Za-z0-9+\\/]{2}==|[A-Za-z0-9+\\/]{3}=|[A-Za-z0-9+\\/]{4})$");
         return std::regex_match(str, b64Pattern);
     }
 
-public:
-    double *bytesRecv = nullptr;
-    double *bytesSent = nullptr;
-
 private:
     std::string serverName = "";
-
-    // mutexes for send and recvd bytes, could also use atomics
-    std::mutex recvMutex;
-    std::mutex sentMutex;
-
-    bool isLocked = false;
-    ImGuiLog *log = nullptr;
     Logger *logger = nullptr;
-
     PigeonData* m_data = nullptr;
 
 private:
     std::unordered_map<int, Client *> *clients;
-    std::vector<std::thread> threadPool;
+    std::mutex m_clientsMtx;
+
 };

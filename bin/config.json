@@ -1,0 +1,10 @@
+{
+    "servername": "PGN-MULTIMEDIA-1",
+    "port": 4444,
+    "cert": "cert.pem",
+    "key": "key.pem",
+    "MOTD": "Angel Luis Rocks!",
+    "LogPkt": false,
+    "ratelimit": 5,
+    "sizelimit": 1000
+}

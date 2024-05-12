@@ -6,17 +6,11 @@
  * @param keyPath The path to the key.
  * @param serverName The name of the server.
  * @param port The port number.
- * @param log Pointer to ImGuiLog object.
  * @param logger Pointer to Logger object.
  */
-PigeonServer::PigeonServer(const std::string &certPath, const std::string &keyPath, const std::string &serverName, unsigned short port, ImGuiLog *log, Logger *logger) : TcpServer(certPath, keyPath, port), serverName(serverName), log(log), logger(logger)
+PigeonServer::PigeonServer(const std::string &certPath, const std::string &keyPath, const std::string &serverName, unsigned short port, Logger *logger) : TcpServer(certPath, keyPath, port), serverName(serverName), logger(logger)
 {
     clients = new std::unordered_map<int, Client *>();
-    this->bytesRecv = new double(0);
-    this->bytesSent = new double(0);
-
-    if (log != nullptr)
-        log->AddLog((GetDate() + " [INFO] Setting up TCP server\n").c_str());
 
     logger->log(DEBUG, "Setting up TCP server");
 
@@ -27,18 +21,13 @@ PigeonServer::PigeonServer(const std::string &certPath, const std::string &keyPa
     }
 };
 
-PigeonServer::PigeonServer(PigeonData &data, ImGuiLog *log, Logger *logger) : TcpServer(data.GetData()["cert"].asString(), data.GetData()["key"].asString(), (unsigned short)data.GetData()["port"].asInt()),
-                                                                              serverName(data.GetData()["serverName"].asString()),
-                                                                              log(log),
-                                                                              logger(logger),
-                                                                              m_data(&data)
+PigeonServer::PigeonServer(PigeonData &data, Logger *logger) : TcpServer(data.GetData()["cert"].asString(), data.GetData()["key"].asString(), (unsigned short)data.GetData()["port"].asInt()),
+                                                               serverName(data.GetData()["serverName"].asString()),
+                                                               logger(logger),
+                                                               m_data(&data)
 {
     clients = new std::unordered_map<int, Client *>();
-    this->bytesRecv = new double(0);
-    this->bytesSent = new double(0);
-
-    if (log != nullptr)
-        log->AddLog((GetDate() + " [INFO] Setting up TCP server\n").c_str());
+    
 
     logger->log(DEBUG, "Setting up TCP server");
 
@@ -51,22 +40,17 @@ PigeonServer::PigeonServer(PigeonData &data, ImGuiLog *log, Logger *logger) : Tc
 
 /**
  * @brief Runs the Pigeon server.
- * @param shouldDelete Boolean reference indicating if the server should be deleted.
  */
-void PigeonServer::Run(bool &shouldDelete)
+void PigeonServer::Run()
 {
     signal(SIGPIPE, SIG_IGN);
 
     while (1)
     {
-        /*
-         * We need to store clients ip, just in case another client with the same ip tries to connect.
-         * Checking is done before SSL/TLS handshake. If after TCP handhsake ip is duplicated, con will be closed.
-         *
-         * This isnt really needed, but it provides another layer of security against attacks in a local network env.
-         * Another approach should be used if this ever gets deployed.
-         */
-
+       /*
+        * Storing client ip addr just in case we need it might be useful to check if the same ip is connecting twice or more
+        * 
+       */
         sockaddr_in clientAddr;
         unsigned int len = sizeof(sockaddr_in);
 
@@ -82,8 +66,6 @@ void PigeonServer::Run(bool &shouldDelete)
 
         if (client < 0)
         {
-            if (log != nullptr)
-                log->AddLog((GetDate() + " [ERR] Failed TCP Handshake\n").c_str());
 
             logger->log(ERROR, "Failed TCP Handshake");
 
@@ -91,13 +73,9 @@ void PigeonServer::Run(bool &shouldDelete)
         }
 
         /*if(CheckIp(std::string(clientIp))){
-            log->AddLog((GetDate() + " [ERR] IP is already in use \n").c_str());
             close(client);
             continue;
         }*/
-
-        if (log != nullptr)
-            log->AddLog((GetDate() + " [OK] TCP Handshake\n").c_str());
 
         logger->log(DEBUG, "OK TCP Handshake");
 
@@ -106,8 +84,6 @@ void PigeonServer::Run(bool &shouldDelete)
 
         if (SSL_accept(ssl) == 0)
         {
-            if (log != nullptr)
-                log->AddLog((GetDate() + " [ERR] Failed TLS Handshake\n").c_str());
 
             logger->log(ERROR, "Failed TLS Handshake");
 
@@ -117,15 +93,17 @@ void PigeonServer::Run(bool &shouldDelete)
         }
         else
         {
-            if (log != nullptr)
-                log->AddLog((GetDate() + " [OK] TLS Handshake\n").c_str());
 
             logger->log(DEBUG, "OK TLS Handshake");
 
             Client *client1 = new Client();
             client1->clientSsl = ssl;
             client1->ipv4 = std::string(clientIp);
+
+            
+            std::unique_lock<std::mutex> lock(this->m_clientsMtx);
             auto latestClientIter = clients->insert({client, client1});
+            lock.unlock();
 
             /*
              *  Each client is managed within its own thread. Probably not the best approach efficiently wise, but its pretty simple to implement.
@@ -137,9 +115,8 @@ void PigeonServer::Run(bool &shouldDelete)
              */
 
             std::thread([latestClientIter, this]
-                        {
-                    if(log != nullptr)
-                        log->AddLog((GetDate() + " [INFO] NEW THREAD FOR CLIENT FD: " + std::to_string(latestClientIter.first->first) + "\n").c_str());
+            {
+                    
                     
                     logger->log(INFO," [INFO] NEW THREAD FOR CLIENT FD: " + std::to_string(latestClientIter.first->first));
 
@@ -152,61 +129,31 @@ void PigeonServer::Run(bool &shouldDelete)
                             logger->log(DEBUG, "NEW PKT: " + String::HexToString(a));
 
 
-                        if(!a.empty() && bytesRecv != nullptr){
-                            std::unique_lock<std::mutex>(recvMutex);
-                            *this->bytesRecv += a.size();
-                        }
-
                         if(a.empty()){
      
                                 if(clients->find(latestClientIter.first->first) != clients->end()){
-                                    if(log != nullptr)
-                                        log->AddLog((GetDate() + " [FIN] ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first) + "\n").c_str());             
+                                        
                                     
                                     logger->log(INFO,"ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));
 
 
                                     DisconnectClient(latestClientIter.first->second->clientSsl);
                                     FreeClient(latestClientIter.first->first,latestClientIter.first->second->clientSsl);
-
-                                    //If a client doesnt complete the handshake a broadcast of presence will also be sent, shouldnt be a concern at least for now
-
-                                    std::string toSend = "{";
-                                    for(auto& c : *clients){
-                                        if(!c.second->username.empty()){
-                                            std::string pair = ( '"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
-                                            toSend += pair;
-                                        }
-                                    }
                                     
-                                    if(toSend.length() >= 2){
-                                        //remove last ,
-                                        toSend.pop_back();
-                                        toSend += '}';
-                                    }
-                                   
-                                    BroadcastPacket(BuildPacket(PRESENCE_UPDATE,this->serverName,String::StringToBytes(toSend)));
-                                    if(log != nullptr)
-                                        log->AddLog((GetDate() + " [FIN] AMOUNT OF CLIENTS: " + std::to_string(clients->size()) + "\n").c_str());             
-                                    
+                                    this->NotifyNewPresence();
+
                                     logger->log(INFO,"AMOUNT OF CLIENTS: " + std::to_string(clients->size()));
                            
                                 }
                             break;
                         }
+
                         auto c = DeserializePacket(a);
                    
                         PigeonPacket toSend = ProcessPacket(c,latestClientIter.first->first);
 
-                        if(!a.empty() && bytesRecv != nullptr){
-                            std::unique_lock<std::mutex>(sentMutex);
-                            *this->bytesSent += SerializePacket(toSend).size();
-                        }
-
                         if(toSend.HEADER.OPCODE == ACK_MEDIA_DOWNLOAD){
-                            if(log != nullptr)
-                                log->AddLog((GetDate() + " [INFO] SENDING FILE TO " +latestClientIter.first->second->username + "\n").c_str());
-                             
+                                                         
                             logger->log(INFO,"SENDING FILE TO " + latestClientIter.first->second->username);
  
                              auto bufToSend = SerializePacket(toSend);
@@ -219,63 +166,38 @@ void PigeonServer::Run(bool &shouldDelete)
 
                             auto bufToSend = SerializePacket(toSend);
                             SendAll(bufToSend,latestClientIter.first->second->clientSsl);
+                            
+                            this->NotifyNewPresence();
 
-                                    if(log != nullptr)
-                                        log->AddLog((GetDate() + " [BRD] UPDATE PRESENCE " + "\n").c_str());
+                            continue;
+                        }
 
-                                    logger->log(DEBUG,"BRD UPDATE PRESENCE");
-
-                                    
-                                    std::string toSend = "{";
-                                    for(auto& c : *clients){
-                                        std::string pair = ( '"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
-                                        toSend += pair;
-                                    }
-                                    //remove last ,
-                                    toSend.pop_back();
-                                    toSend += '}';
-                                
-                                BroadcastPacket(BuildPacket(PRESENCE_UPDATE,this->serverName,String::StringToBytes(toSend)));
-                                
-
-                               
+                        if(toSend.HEADER.OPCODE == PRESENCE_UPDATE){
+                            this->NotifyNewPresence();
                             continue;
                         }
 
                         //bad packet, close connection and notify all clients
                         if((toSend.HEADER.OPCODE & 0xF0) == 0xE0){
-                            if(clients->find(latestClientIter.first->first) != clients->end()){
-
-                                if(log != nullptr)                                
-                                    log->AddLog((GetDate() + " [FIN] ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first) + "\n").c_str());             
+                            if(clients->find(latestClientIter.first->first) != clients->end()){                             
                                 
-                                logger->log(DEBUG,"ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));
+                                logger->log(DEBUG,"ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));                                
+
+                                auto buf = SerializePacket(toSend);
+                                SendAll(buf,latestClientIter.first->second->clientSsl);
 
                                 DisconnectClient(latestClientIter.first->second->clientSsl);
                                 FreeClient(latestClientIter.first->first,latestClientIter.first->second->clientSsl);
-                                
-                                if(log != nullptr)
-                                    log->AddLog((GetDate() + " [BRD] UPDATE PRESENCE " + "\n").c_str());
 
-                                    std::string toSend = "{";
-                                    for(auto& c : *clients){
-                                        std::string pair = ( '"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
-                                        toSend += pair;
-                                    }
-                                    //remove last ,
-                                    toSend.pop_back();
-                                    toSend += '}';
-                                
-                                BroadcastPacket(BuildPacket(PRESENCE_UPDATE,this->serverName,String::StringToBytes(toSend)));
-                                
-                                if(log != nullptr)
-                                    log->AddLog((GetDate() + " [FIN] AMOUNT OF CLIENTS: " + std::to_string(clients->size()) + "\n").c_str());             
+                                this->NotifyNewPresence();
+
                                 logger->log(INFO,"AMOUNT OF CLIENTS: " + std::to_string(clients->size()));
           
                             }
                             break;
                         }
 
+                        //If reached here, it means that whatever packet is there to send back, it must be broadcasted to all clients, not multicasted or sent directly to one client
                         BroadcastPacket(toSend);
 
                     }
@@ -396,14 +318,11 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
     case CLIENT_HELLO:
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
-            newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + m_data->GetData()["servername"].asString() + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() +  + R"(","sizelimit":)" + std::to_string(m_data->GetData()["sizelimit"].asInt()) + R"(})"));
+            newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + m_data->GetData()["servername"].asString() + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() + +R"(","sizelimit":)" + std::to_string(m_data->GetData()["sizelimit"].asInt()) + R"(})"));
 
             // Kinda pointless since we check previously when readin the packet fix later
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
-
-                if (log != nullptr)
-                    log->AddLog((GetDate() + " [ERR] MESSAGE TOO BIG: " + recv.HEADER.username + "\n").c_str());
 
                 logger->log(ERROR, "MESSAGE TOO BIG: " + recv.HEADER.username);
 
@@ -418,9 +337,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 newPacket = BuildPacket(JSON_NOT_VALID, "", {});
                 break;
             }
-
-            if (log != nullptr)
-                log->AddLog((GetDate() + " [INFO] CLIENT HELLO FROM: " + recv.HEADER.username + " STATUS: " + value["status"].asString() + "\n").c_str());
 
             logger->log(INFO, "CLIENT HELLO FROM: " + recv.HEADER.username + " STATUS: " + value["status"].asString());
 
@@ -458,8 +374,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 {
                     newPacket = BuildPacket(USER_COLLISION, recv.HEADER.username, {});
 
-                    if (log != nullptr)
-                        log->AddLog((GetDate() + " [ERR] USER COLLISION: " + recv.HEADER.username + " IS ALREADY USED" + "\n").c_str());
                     logger->log(ERROR, "USER COLLISION: " + recv.HEADER.username + " IS ALREADY USED");
                 }
 
@@ -467,9 +381,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 if (it->second->username.length() > MAX_USERNAME)
                 {
                     newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username, {});
-
-                    if (log != nullptr)
-                        log->AddLog((GetDate() + " [ERR] USERNAME LENGTH EXCEEDED: " + recv.HEADER.username + "\n").c_str());
 
                     logger->log(ERROR, "USERNAME LENGTH EXCEEDED: " + recv.HEADER.username);
                 }
@@ -488,9 +399,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
             // We can saftely assume that after a successfful CLIENT_HELLO, the clients fd has a valid username and is connected
             // So we need to check if the FD who sent the packet has the same username thats contained in the packet itself.
 
-            if (log != nullptr)
-                log->AddLog((GetDate() + " [INFO] TEXT MESSAGE BY: " + recv.HEADER.username + " " + std::string(recv.PAYLOAD.data(), recv.PAYLOAD.data() + recv.HEADER.CONTENT_LENGTH) + "\n").c_str());
-
             logger->log(INFO, "TEXT MESSAGE BY: " + recv.HEADER.username + " " + std::string(recv.PAYLOAD.data(), recv.PAYLOAD.data() + recv.HEADER.CONTENT_LENGTH));
 
             auto it = clients->find(clientFD);
@@ -500,8 +408,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 // If both usernames match, we just need to verify the packets payload
                 if (recv.PAYLOAD.size() > 512)
                 {
-                    if (log != nullptr)
-                        log->AddLog((GetDate() + " [ERR] TEXT MESSAGE TOO BIG: " + recv.HEADER.username + "\n").c_str());
 
                     logger->log(WARNING, "TEXT MESSAGE TOO BIG: " + recv.HEADER.username);
 
@@ -525,9 +431,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
 
-            if (log != nullptr)
-                log->AddLog((GetDate() + " [INFO] NEW MEDIA FILE BY: " + recv.HEADER.username + " SIZE: " + std::to_string((recv.PAYLOAD.size() / (1000))) + " KB \n").c_str());
-
             logger->log(INFO, "NEW MEDIA FILE BY: " + recv.HEADER.username + " SIZE: " + std::to_string((recv.PAYLOAD.size() / (1000))) + " KB");
 
             auto it = clients->find(clientFD);
@@ -536,8 +439,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
                 if (recv.PAYLOAD.size() > m_data->GetData()["sizelimit"].asInt() * 1000 * 1000)
                 {
-                    if (log != nullptr)
-                        log->AddLog((GetDate() + " [ERR] MEDIA FILE TOO BIG: " + recv.HEADER.username + "\n").c_str());
 
                     logger->log(ERROR, "MEDIA FILE TOO BIG: " + recv.HEADER.username);
                     newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username, {});
@@ -547,8 +448,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 if (std::time(0) - it->second->logTimestamp < m_data->GetData()["ratelimit"].asInt())
                 {
                     newPacket = BuildPacket(RATE_LIMITED, recv.HEADER.username, {});
-                    if (log != nullptr)
-                        log->AddLog((GetDate() + " [ERR] RATE LIMITED: " + recv.HEADER.username + "\n").c_str());
 
                     logger->log(ERROR, "RATE LIMITED: " + recv.HEADER.username);
                     break;
@@ -557,8 +456,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 it->second->logTimestamp = std::time(0);
                 if (!reader.parse(std::string(recv.PAYLOAD.begin(), recv.PAYLOAD.end()), value))
                 {
-                    if (log != nullptr)
-                        log->AddLog((GetDate() + " [ERR] MALFORMED MEDIA PACKET: " + recv.HEADER.username + "\n").c_str());
 
                     logger->log(ERROR, "MALFORMED MEDIA PACKET: " + recv.HEADER.username);
                     newPacket = BuildPacket(JSON_NOT_VALID, recv.HEADER.username, {});
@@ -577,17 +474,19 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
                 if (fileContent == "" || fileName == "")
                 {
-                    if (log != nullptr)
-                        log->AddLog((GetDate() + " [ERR] MALFORMED MEDIA PACKET: " + recv.HEADER.username + "\n").c_str());
 
                     logger->log(ERROR, "MALFORMED MEDIA PACKET: " + recv.HEADER.username);
                     newPacket = BuildPacket(JSON_NOT_VALID, recv.HEADER.username, {});
                     break;
                 }
-                auto contentBuffer = String::StringToBytes(B64::base64_decode(fileContent));
-                bool err = File::BufferToDisk(recv.PAYLOAD, ("Files/" + std::to_string(std::time(0)) + "_" + fileName + ".json"));
 
-                    newPacket = BuildPacket(MEDIA_FILE, recv.HEADER.username, String::StringToBytes(R"({"filename":")" + fileName + R"(", "ext":")" + fileExt + R"("})"));             
+                auto contentBuffer = String::StringToBytes(B64::base64_decode(fileContent));
+
+                {
+                    std::lock_guard<std::mutex> lock(this->m_clientsMtx);
+                    bool err = File::BufferToDisk(recv.PAYLOAD, ("Files/" + std::to_string(std::time(0)) + "_" + fileName + ".json"));
+                }
+                newPacket = BuildPacket(MEDIA_FILE, recv.HEADER.username, String::StringToBytes(R"({"filename":")" + fileName + R"(", "ext":")" + fileExt + R"("})"));
             }
             else
             {
@@ -602,9 +501,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
         break;
 
     case MEDIA_DOWNLOAD:
-
-        if (log != nullptr)
-            log->AddLog((GetDate() + " [INFO] NEW MEDIA DOWNLOAD REQUEST BY: " + recv.HEADER.username + "\n").c_str());
 
         logger->log(INFO, "NEW MEDIA DOWNLOAD REQUEST BY: " + recv.HEADER.username);
 
@@ -622,8 +518,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
             // Also kinda pointless
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
-                if (log != nullptr)
-                    log->AddLog((GetDate() + " [ERR] MESSAGE TOO BIG: " + recv.HEADER.username + "\n").c_str());
+
                 logger->log(ERROR, "MEDIA FILE REQUEST TOO BIG: " + recv.HEADER.username);
 
                 newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username, {});
@@ -633,8 +528,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
             if (std::time(0) - it->second->logTimestamp < 15)
             {
                 newPacket = BuildPacket(RATE_LIMITED, recv.HEADER.username, {});
-                if (log != nullptr)
-                    log->AddLog((GetDate() + " [ERR] RATE LIMITED: " + recv.HEADER.username + "\n").c_str());
+
                 logger->log(ERROR, "RATE LIMITED: " + recv.HEADER.username);
 
                 break;
@@ -644,8 +538,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
             if (!reader.parse(std::string(recv.PAYLOAD.begin(), recv.PAYLOAD.end()), value))
             {
-                if (log != nullptr)
-                    log->AddLog((GetDate() + " [ERR] MALFORMED DOWNLOAD PACKET: " + recv.HEADER.username + "\n").c_str());
+
                 newPacket = BuildPacket(JSON_NOT_VALID, recv.HEADER.username, {});
                 break;
             }
@@ -655,8 +548,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
             if (filename == "")
             {
-                if (log != nullptr)
-                    log->AddLog((GetDate() + " [ERR] MALFORMED DOWNLOAD REQUEST: " + recv.HEADER.username + "\n").c_str());
 
                 logger->log(ERROR, "MALFORMED DOWNLOAD REQUEST: " + recv.HEADER.username);
 
@@ -664,12 +555,14 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 break;
             }
 
-            auto buffer = File::DiskToBuffer("Files/" + filename + ".json");
+            std::vector<unsigned char> buffer;
+            {
+                std::lock_guard<std::mutex> lock(this->m_clientsMtx);
+                buffer = File::DiskToBuffer("Files/" + filename + ".json");
+            }
 
             if (buffer.empty())
             {
-                if (log != nullptr)
-                    log->AddLog((GetDate() + " [WARN] FILE NOT FOUND: " + recv.HEADER.username + "\n").c_str());
 
                 logger->log(WARNING, "FILE NOT FOUND: " + recv.HEADER.username);
                 newPacket = BuildPacket(FILE_NOT_FOUND, recv.HEADER.username, {});
@@ -690,9 +583,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
         if (!recv.HEADER.username.empty())
         {
 
-            if (log != nullptr)
-                log->AddLog((GetDate() + " [INFO] NEW PRESENCE REQUEST BY: " + recv.HEADER.username + "\n").c_str());
-
             logger->log(INFO, "NEW PRESENCE REQUEST BY: " + recv.HEADER.username);
 
             auto it = clients->find(clientFD);
@@ -703,20 +593,8 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 break;
             }
 
-            // ugly code, but it works
+            newPacket = BuildPacket(PRESENCE_UPDATE,"",{});
 
-            std::string toSend = "{";
-            for (auto &c : *clients)
-            {
-                std::string pair = ('"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
-                toSend += pair;
-            }
-
-            // remove last ,
-            toSend.pop_back();
-            toSend += '}';
-
-            newPacket = BuildPacket(PRESENCE_UPDATE, recv.HEADER.username, String::StringToBytes(toSend));
         }
         else
         {
@@ -729,15 +607,11 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
 
-            if (log != nullptr)
-                log->AddLog((GetDate() + " [INFO] NEW PRESENCE UPDATE REQUEST BY: " + recv.HEADER.username + "\n").c_str());
-
             logger->log(INFO, "NEW PRESENCE UPDATE REQUEST BY: " + recv.HEADER.username);
 
             // Pointless
             if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
             {
-                log->AddLog((GetDate() + " [ERR] MESSAGE TOO BIG: " + recv.HEADER.username + "\n").c_str());
                 newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username, {});
                 break;
             }
@@ -769,18 +643,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 it->second->status = DND;
             }
 
-            std::string toSend = "{";
-            for (auto &c : *clients)
-            {
-                std::string pair = ('"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
-                toSend += pair;
-            }
-
-            // remove last ,
-            toSend.pop_back();
-            toSend += '}';
-
-            newPacket = BuildPacket(PRESENCE_UPDATE, recv.HEADER.username, String::StringToBytes(toSend));
+            newPacket = BuildPacket(PRESENCE_UPDATE,"",{});
         }
         else
         {
@@ -823,22 +686,18 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
     */
     for (int i = 0; i < 4; i++)
     {
-        
-        headerLength += packetBuffer[i] << (8 * i);
 
+        headerLength += packetBuffer[i] << (8 * i);
     }
 
     if (headerLength > MAX_HEADER)
     {
-        if (log != nullptr)
-            log->AddLog((GetDate() + " [FATAL] PACKET HEADER TOO BIG \n").c_str());
         logger->log(ERROR, "PACKET HEADER TOO BIG");
 
         return {};
     }
 
     total = TcpServer::Recv(packetBuffer, headerLength + 4, total, ssl1);
-
 
     packetBuffer.resize(total);
 
@@ -878,4 +737,27 @@ void *PigeonServer::BroadcastPacket(const PigeonPacket &packet)
         }
     }
     return nullptr;
+}
+
+void PigeonServer::NotifyNewPresence()
+{
+
+    std::string toSend = "{";
+    for (auto &c : *clients)
+    {
+        if (!c.second->username.empty())
+        {
+            std::string pair = ('"' + c.second->username + '"' + ":" + '"' + std::to_string(c.second->status) + '"' + ',');
+            toSend += pair;
+        }
+    }
+
+    if (toSend.length() >= 2)
+    {
+        // remove last ,
+        toSend.pop_back();
+        toSend += '}';
+    }
+
+    BroadcastPacket(BuildPacket(PRESENCE_UPDATE, this->serverName, String::StringToBytes(toSend)));
 }
