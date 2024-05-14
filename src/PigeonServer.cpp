@@ -1,7 +1,7 @@
 #include "PigeonServer.h"
 
 /**
- * @brief Constructor for PigeonServer class.
+ * @brief Manual Constructor for PigeonServer class.
  * @param certPath The path to the certificate.
  * @param keyPath The path to the key.
  * @param serverName The name of the server.
@@ -21,6 +21,9 @@ PigeonServer::PigeonServer(const std::string &certPath, const std::string &keyPa
     }
 };
 
+/*
+* @brief Constructor for PigeonServer class from Pigeon Data directly.
+*/
 PigeonServer::PigeonServer(PigeonData &data, Logger *logger) : TcpServer(data.GetData()["cert"].asString(), data.GetData()["key"].asString(), (unsigned short)data.GetData()["port"].asInt()),
                                                                serverName(data.GetData()["serverName"].asString()),
                                                                logger(logger),
@@ -77,7 +80,7 @@ void PigeonServer::Run()
             continue;
         }*/
 
-        logger->log(DEBUG, "OK TCP Handshake");
+        logger->log(DEBUG, "OK TCP Handshake " + std::string(clientIp));
 
         ssl = SSL_new(sslCtx);
         SSL_set_fd(ssl, client);
@@ -85,7 +88,7 @@ void PigeonServer::Run()
         if (SSL_accept(ssl) == 0)
         {
 
-            logger->log(ERROR, "Failed TLS Handshake");
+            logger->log(ERROR, "Failed TLS Handshake " + std::string(clientIp));
 
             SSL_shutdown(ssl);
             SSL_free(ssl);
@@ -94,13 +97,13 @@ void PigeonServer::Run()
         else
         {
 
-            logger->log(DEBUG, "OK TLS Handshake");
+            logger->log(DEBUG, "OK TLS Handshake " + std::string(clientIp));
 
             Client *client1 = new Client();
             client1->clientSsl = ssl;
             client1->ipv4 = std::string(clientIp);
 
-            
+            //manual lock
             std::unique_lock<std::mutex> lock(this->m_clientsMtx);
             auto latestClientIter = clients->insert({client, client1});
             lock.unlock();
@@ -115,13 +118,17 @@ void PigeonServer::Run()
              */
 
             std::thread([latestClientIter, this]
-            {
-                    
-                    
+            {         
                     logger->log(INFO," [INFO] NEW THREAD FOR CLIENT FD: " + std::to_string(latestClientIter.first->first));
 
                     while (1)
                     {   
+
+                        /*
+                        * Problem here
+                        * Client can complete tcp/tls handshake but after that never send a packet acting as a zombie but also taking 1 thread
+                        * timeout needs to be implementing but since ReadPacket is reached the loop blocks idk how to do it
+                        */
 
                         std::vector<unsigned char> a = ReadPacket(latestClientIter.first->second->clientSsl);
 
@@ -130,18 +137,18 @@ void PigeonServer::Run()
 
 
                         if(a.empty()){
-     
+                                std::lock_guard<std::mutex> lock(this->m_clientsMtx);
+
                                 if(clients->find(latestClientIter.first->first) != clients->end()){
                                         
-                                    
-                                    logger->log(INFO,"ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));
-
+                                    logger->log(DEBUG,"ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));
+                                    //std::cout << "ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first) << std::endl;
 
                                     DisconnectClient(latestClientIter.first->second->clientSsl);
                                     FreeClient(latestClientIter.first->first,latestClientIter.first->second->clientSsl);
                                     
                                     this->NotifyNewPresence();
-
+                                    
                                     logger->log(INFO,"AMOUNT OF CLIENTS: " + std::to_string(clients->size()));
                            
                                 }
@@ -202,7 +209,7 @@ void PigeonServer::Run()
 
                     }
                     return; })
-                .detach();
+                .detach(); // could also probaby just store the threads somewhere instead of detach
         }
     }
 }
@@ -310,26 +317,23 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
     Json::Reader reader;
     Json::Value value;
 
-    // If client completed handshake, username is stored in Client, if a client tries to send a packet before making a handshake (aka his username doesnt exist), bad client = close con,
+    // If client completed handshake, username is stored in Client, if a client tries to send a packet before making a handshake (aka username doesnt exist), bad client = close con,
     //  that way we ensure a client has completed handshake properly
 
     switch (recv.HEADER.OPCODE)
     {
+        /*
+        *  Client sends a CLIENT_HELLO packet
+        *  Check if payload/username empty
+        *  Check if bad json in payload
+        *  Check if client already exist
+        *  Check if username exceeds MAX_USERNAME
+        */
     case CLIENT_HELLO:
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
             newPacket = BuildPacket(SERVER_HELLO, recv.HEADER.username, String::StringToBytes(R"({"ServerName":")" + m_data->GetData()["servername"].asString() + R"(","MOTD":")" + m_data->GetData()["MOTD"].asString() + +R"(","sizelimit":)" + std::to_string(m_data->GetData()["sizelimit"].asInt()) + R"(})"));
-
-            // Kinda pointless since we check previously when readin the packet fix later
-            if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
-            {
-
-                logger->log(ERROR, "MESSAGE TOO BIG: " + recv.HEADER.username);
-
-                newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username, {});
-                break;
-            }
-
+            
             auto it = this->clients->find(clientFD);
 
             if (!reader.parse(std::string(recv.PAYLOAD.begin(), recv.PAYLOAD.end()), value))
@@ -392,6 +396,13 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
         }
         break;
 
+    /*
+    *  Client Sends a TEXT_MESSAGE packet
+    *   Usual payload/username check
+    *   Check if client exist
+    *   Check txt message length
+    *   
+    */
     case TEXT_MESSAGE:
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
@@ -408,7 +419,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 // If both usernames match, we just need to verify the packets payload
                 if (recv.PAYLOAD.size() > 512)
                 {
-
                     logger->log(WARNING, "TEXT MESSAGE TOO BIG: " + recv.HEADER.username);
 
                     newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username, {});
@@ -427,6 +437,14 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
         }
         break;
 
+    /*
+    *  Client sends a file
+    *  Username/payload check
+    *  Check if payload exceeds limit
+    *  Check if user is ratelimited
+    *  Check valid json with all expected fields
+    *  Writing to disk
+    */
     case MEDIA_FILE:
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
@@ -482,6 +500,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
                 auto contentBuffer = String::StringToBytes(B64::base64_decode(fileContent));
 
+                //Mutual exlcusion using RAII locks
                 {
                     std::lock_guard<std::mutex> lock(this->m_clientsMtx);
                     bool err = File::BufferToDisk(recv.PAYLOAD, ("Files/" + std::to_string(std::time(0)) + "_" + fileName + ".json"));
@@ -499,7 +518,12 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
             newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username, {});
         }
         break;
-
+    /*
+    *   Media download request
+    *   Username/payload check
+    *   Check if bad json and has all the expected fields
+    *   If to send buffer was empty it means it couldnt read the file aka it doesnt exist
+    */
     case MEDIA_DOWNLOAD:
 
         logger->log(INFO, "NEW MEDIA DOWNLOAD REQUEST BY: " + recv.HEADER.username);
@@ -515,15 +539,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 break;
             }
 
-            // Also kinda pointless
-            if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
-            {
-
-                logger->log(ERROR, "MEDIA FILE REQUEST TOO BIG: " + recv.HEADER.username);
-
-                newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username, {});
-                break;
-            }
 
             if (std::time(0) - it->second->logTimestamp < 15)
             {
@@ -555,6 +570,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                 break;
             }
 
+            //verify filename later in case of path traversal but it wont really happen
             std::vector<unsigned char> buffer;
             {
                 std::lock_guard<std::mutex> lock(this->m_clientsMtx);
@@ -563,7 +579,6 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
             if (buffer.empty())
             {
-
                 logger->log(WARNING, "FILE NOT FOUND: " + recv.HEADER.username);
                 newPacket = BuildPacket(FILE_NOT_FOUND, recv.HEADER.username, {});
                 break;
@@ -578,6 +593,12 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 
         break;
 
+    /*
+    * All clients presence request
+    * No need to check if payload cuz this packet must not have a payload
+    * 
+    *
+    */
     case PRESENCE_REQUEST:
 
         if (!recv.HEADER.username.empty())
@@ -602,19 +623,17 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
         }
 
         break;
-
+    /*
+    * Presence update request
+    * Verify payload/username
+    * Bad json check
+    * Only if the status field exist then presence will update
+    */
     case PRESENCE_UPDATE:
         if (!recv.PAYLOAD.empty() && !recv.HEADER.username.empty())
         {
 
             logger->log(INFO, "NEW PRESENCE UPDATE REQUEST BY: " + recv.HEADER.username);
-
-            // Pointless
-            if (recv.PAYLOAD.size() > 256 * 1000 * 1000)
-            {
-                newPacket = BuildPacket(LENGTH_EXCEEDED, recv.HEADER.username, {});
-                break;
-            }
 
             auto it = this->clients->find(clientFD);
 
@@ -650,6 +669,10 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
             newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username, {});
         }
         break;
+    /*
+    * If opcode doesnt match any opcode then it must be bad packet/other protocol
+    *
+     */
     default:
         newPacket = BuildPacket(PROTOCOL_MISMATCH, recv.HEADER.username, {});
         break;
@@ -660,13 +683,13 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
 /**
  * @brief Read incoming packet from a valid SSL/TLS connection.
  * @param ssl1 SSL/TLS connection from an active client.
+ * 
+ * If a emtpy vector is returned, the connection with the client will be closed
  */
 // Packet is 4 bytes + 8 bytes + 1 byte + username (max 20 chars == 20 bytes) + 1 byte null char + 4 bytes payload size + payload ( max 256 MB)
 std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
 {
     std::vector<unsigned char> packetBuffer(MAX_HEADER);
-
-    // 15 00 00 00
 
     int total = TcpServer::Recv(packetBuffer, 4, 0, ssl1);
 
@@ -686,7 +709,6 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
     */
     for (int i = 0; i < 4; i++)
     {
-
         headerLength += packetBuffer[i] << (8 * i);
     }
 
@@ -707,6 +729,11 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
         payloadLength = (payloadLength << 8) | packetBuffer[i];
     }
 
+    if(payloadLength >= 256*1000*1000){
+        logger->log(ERROR, "PAYLOAD TOO BIG");
+        return {};
+    }
+
     if (payloadLength == 0)
     {
         return packetBuffer;
@@ -714,6 +741,7 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
 
     packetBuffer.resize(packetBuffer.size() + payloadLength);
 
+    //Logger is passed here so we can log the recv bytes when downloading the file from the client
     total = TcpServer::Recv(packetBuffer, headerLength + 4 + payloadLength, total, ssl1, this->logger);
 
     return packetBuffer;
@@ -733,12 +761,17 @@ void *PigeonServer::BroadcastPacket(const PigeonPacket &packet)
         for (auto &c : *clients)
         {
             clientsStr += std::to_string(c.first) + " ";
-            sent = SendAll(packetToSend, c.second->clientSsl);
+            sent += SendAll(packetToSend, c.second->clientSsl);
         }
+        this->logger->log(DEBUG, "BROADCASTED " + std::to_string(sent) + " BYTES");
     }
     return nullptr;
 }
 
+/**
+ * @brief Sends a PigeonPacket to all connected clients.
+ * @param packet Packet to sent.
+ */
 void PigeonServer::NotifyNewPresence()
 {
 

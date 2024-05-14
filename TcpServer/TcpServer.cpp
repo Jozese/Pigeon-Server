@@ -99,9 +99,9 @@ int TcpServer::SendAll(std::vector<unsigned char>& buf, SSL* ssl){
     while (totalSent < buf.size()) {
         nSent = SSL_write(ssl, buf.data() + totalSent, leftToSend);
 
-        if (nSent <= 0) {
+        if (nSent < 0) {
             int error = SSL_get_error(ssl, nSent);
-            std::cout << "Error while sending: " << error << std::endl;
+            //std::cout << "Error while sending: " << error << std::endl;
             break;
         }
 

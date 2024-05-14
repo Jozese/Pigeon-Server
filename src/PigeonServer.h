@@ -121,10 +121,8 @@ public:
         return time;
     }
 
-    //Need mutex
     inline void FreeClient(int c, SSL *cSSL)
     {
-        std::lock_guard<std::mutex> lock(this->m_clientsMtx);
 
         shutdown(c, SHUT_RDWR);
         close(c);
@@ -139,7 +137,7 @@ public:
     };
 
     inline void DisconnectClient(SSL *cSSL)
-    {
+    {   
         SSL_shutdown(cSSL);
     }
 
