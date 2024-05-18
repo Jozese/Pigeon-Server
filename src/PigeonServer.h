@@ -57,6 +57,7 @@ struct Client
     std::time_t logTimestamp;
     std::string username;
     Status status;
+    bool hasLogged = false;
 
     Client() : clientSsl(nullptr), logTimestamp(std::time(0)), username(""), status(ONLINE), ipv4(""){};
 };
@@ -121,24 +122,29 @@ public:
         return time;
     }
 
-    inline void FreeClient(int c, SSL *cSSL)
+    /*
+        Properly frees a client by its FD
+    */
+    inline void FreeClient(int c)
     {
 
-        shutdown(c, SHUT_RDWR);
-        close(c);
         auto it = clients->find(c);
         if (it != clients->end())
         {
+            SSL_free(it->second->clientSsl);
+            it->second->clientSsl = nullptr;
             delete it->second;
             clients->erase(it);
         }
-        SSL_free(cSSL);
         
     };
 
-    inline void DisconnectClient(SSL *cSSL)
+
+    inline void DisconnectClient(int c,SSL *cSSL)
     {   
         SSL_shutdown(cSSL);
+        shutdown(c, SHUT_RDWR);
+        close(c);
     }
 
     inline bool CheckIp(const std::string &ipv4)
@@ -153,7 +159,7 @@ public:
         return false;
     }
 
-    //Not really used
+    //Not  used
     inline bool isBase64(const std::string &str)
     {
         std::regex b64Pattern("^(?:[A-Za-z0-9+\\/]{4})*(?:[A-Za-z0-9+\\/]{2}==|[A-Za-z0-9+\\/]{3}=|[A-Za-z0-9+\\/]{4})$");

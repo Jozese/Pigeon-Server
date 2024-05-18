@@ -39,6 +39,37 @@ PigeonServer::PigeonServer(PigeonData &data, Logger *logger) : TcpServer(data.Ge
         logger->log(ERROR, "Error while setting up tcp server");
         exit(EXIT_FAILURE);
     }
+
+    /*
+    * Watcher thread that prevents zombie tcp connections. If a tcp connection has not sent a CLIENT_HELLO message in 10 seconds
+    * it will be instantly disconnected. DisconnectClient will close the socket and wake up the blocking main thread of the client,
+    * so the client is freed properly after disconnecting. All clients are checked every one second.
+    */
+
+    std::thread([this]{
+        
+        while (true)
+        {
+            std::time_t currentCheckTime = std::time(0);
+
+            std::unique_lock<std::mutex> lock(this->m_clientsMtx);
+
+            if(!clients->empty()){
+                for(auto& client: *clients){
+                    if(!client.second->hasLogged){
+                        if(currentCheckTime - client.second->logTimestamp >= 10){
+                            this->logger->log(ERROR,"Zombie connection detected. Killing FD: " + std::to_string(client.first));
+                            DisconnectClient(client.first, client.second->clientSsl);
+                        }
+                    }  
+                }
+            }
+
+            lock.unlock();
+
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }).detach();
 }
 
 /**
@@ -99,13 +130,14 @@ void PigeonServer::Run()
 
             logger->log(DEBUG, "OK TLS Handshake " + std::string(clientIp));
 
-            Client *client1 = new Client();
-            client1->clientSsl = ssl;
-            client1->ipv4 = std::string(clientIp);
+            Client *newClient = new Client();
+            newClient->clientSsl = ssl;
+            newClient->ipv4 = std::string(clientIp);
+            newClient->logTimestamp = std::time(0);
 
             //manual lock
             std::unique_lock<std::mutex> lock(this->m_clientsMtx);
-            auto latestClientIter = clients->insert({client, client1});
+            auto clientIter = clients->insert({client, newClient});
             lock.unlock();
 
             /*
@@ -117,54 +149,50 @@ void PigeonServer::Run()
              *
              */
 
-            std::thread([latestClientIter, this]
+            std::thread([clientIter, this]
             {         
-                    logger->log(INFO," [INFO] NEW THREAD FOR CLIENT FD: " + std::to_string(latestClientIter.first->first));
+                    logger->log(INFO," [INFO] NEW THREAD FOR CLIENT FD: " + std::to_string(clientIter.first->first));
 
                     while (1)
                     {   
-
-                        /*
-                        * Problem here
-                        * Client can complete tcp/tls handshake but after that never send a packet acting as a zombie but also taking 1 thread
-                        * timeout needs to be implementing but since ReadPacket is reached the loop blocks idk how to do it
-                        */
-
-                        std::vector<unsigned char> a = ReadPacket(latestClientIter.first->second->clientSsl);
+                    
+                        // thread will block here untill a disconnection (empty packet) or an actual packet was read.
+                        std::vector<unsigned char> clientPacket = ReadPacket(clientIter.first->second->clientSsl);
 
                         if(m_data->GetData()["LogPkt"].asBool())
-                            logger->log(DEBUG, "NEW PKT: " + String::HexToString(a));
+                            logger->log(DEBUG, "NEW PKT: " + String::HexToString(clientPacket));
 
 
-                        if(a.empty()){
+                        if(clientPacket.empty())
+                        {
                                 std::lock_guard<std::mutex> lock(this->m_clientsMtx);
 
-                                if(clients->find(latestClientIter.first->first) != clients->end()){
-                                        
-                                    logger->log(DEBUG,"ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));
-                                    //std::cout << "ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first) << std::endl;
+                                    if(clients->find(clientIter.first->first) != clients->end()){
+                                            
+                                        logger->log(DEBUG,"ENDED THREAD FOR FD: " + std::to_string(clientIter.first->first));
 
-                                    DisconnectClient(latestClientIter.first->second->clientSsl);
-                                    FreeClient(latestClientIter.first->first,latestClientIter.first->second->clientSsl);
-                                    
-                                    this->NotifyNewPresence();
-                                    
-                                    logger->log(INFO,"AMOUNT OF CLIENTS: " + std::to_string(clients->size()));
-                           
-                                }
+                                        DisconnectClient(clientIter.first->first,clientIter.first->second->clientSsl);
+                                        FreeClient(clientIter.first->first);
+                                        
+                                        this->NotifyNewPresence();
+  
+                                    }
+
+                                logger->log(INFO,"AMOUNT OF CLIENTS: " + std::to_string(clients->size()));
                             break;
                         }
+                        
 
-                        auto c = DeserializePacket(a);
+                        auto clientPigeonPacket = DeserializePacket(clientPacket);
                    
-                        PigeonPacket toSend = ProcessPacket(c,latestClientIter.first->first);
+                        PigeonPacket toSend = ProcessPacket(clientPigeonPacket,clientIter.first->first);
 
                         if(toSend.HEADER.OPCODE == ACK_MEDIA_DOWNLOAD){
                                                          
-                            logger->log(INFO,"SENDING FILE TO " + latestClientIter.first->second->username);
+                            logger->log(INFO,"SENDING FILE TO " + clientIter.first->second->username);
  
                              auto bufToSend = SerializePacket(toSend);
-                             SendAll(bufToSend,latestClientIter.first->second->clientSsl);
+                             SendAll(bufToSend,clientIter.first->second->clientSsl);
                              continue;
                         }
 
@@ -172,7 +200,7 @@ void PigeonServer::Run()
                         if(toSend.HEADER.OPCODE == SERVER_HELLO){
 
                             auto bufToSend = SerializePacket(toSend);
-                            SendAll(bufToSend,latestClientIter.first->second->clientSsl);
+                            SendAll(bufToSend,clientIter.first->second->clientSsl);
                             
                             this->NotifyNewPresence();
 
@@ -186,15 +214,15 @@ void PigeonServer::Run()
 
                         //bad packet, close connection and notify all clients
                         if((toSend.HEADER.OPCODE & 0xF0) == 0xE0){
-                            if(clients->find(latestClientIter.first->first) != clients->end()){                             
+                            if(clients->find(clientIter.first->first) != clients->end()){                             
                                 
-                                logger->log(DEBUG,"ENDED THREAD FOR FD: " + std::to_string(latestClientIter.first->first));                                
+                                logger->log(DEBUG,"ENDED THREAD FOR FD: " + std::to_string(clientIter.first->first));                                
 
                                 auto buf = SerializePacket(toSend);
-                                SendAll(buf,latestClientIter.first->second->clientSsl);
+                                SendAll(buf,clientIter.first->second->clientSsl);
 
-                                DisconnectClient(latestClientIter.first->second->clientSsl);
-                                FreeClient(latestClientIter.first->first,latestClientIter.first->second->clientSsl);
+                                DisconnectClient(clientIter.first->first,clientIter.first->second->clientSsl);
+                                FreeClient(clientIter.first->first);
 
                                 this->NotifyNewPresence();
 
@@ -299,7 +327,7 @@ PigeonPacket PigeonServer::BuildPacket(PIGEON_OPCODE opcode, const std::string &
     pkt.HEADER.CONTENT_LENGTH = pkt.PAYLOAD.size();
     pkt.HEADER.TIME_STAMP = std::time(0);
     pkt.HEADER.username = username;
-    pkt.HEADER.HEADER_LENGTH = sizeof(std::time_t) +
+    pkt.HEADER.HEADER_LENGTH = sizeof(std::time_t) +            
                                pkt.HEADER.username.length() + 1 +
                                sizeof(unsigned char) +
                                sizeof(int);
@@ -373,6 +401,8 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                     {
                         it->second->status = DND;
                     }
+
+                    it->second->hasLogged = true;
                 }
                 else
                 {
@@ -693,7 +723,7 @@ std::vector<unsigned char> PigeonServer::ReadPacket(SSL *ssl1)
 
     int total = TcpServer::Recv(packetBuffer, 4, 0, ssl1);
 
-    // This could also mean error when receving. In case of error/wrong packet, empty vector is returned and the connection will be closed
+    // This could also mean error when receving, but mainly used in case of a disconnect. In case of error/wrong packet, empty vector is returned and the connection will be closed
     if (total < 4)
     {
         return {};
