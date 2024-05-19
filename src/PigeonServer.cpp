@@ -1,7 +1,9 @@
 #include "PigeonServer.h"
 
 /**
- * @brief Manual Constructor for PigeonServer class.
+ * 
+ * 
+ * @brief Manual Constructor for PigeonServer class. This constructor should not be used.
  * @param certPath The path to the certificate.
  * @param keyPath The path to the key.
  * @param serverName The name of the server.
@@ -187,6 +189,7 @@ void PigeonServer::Run()
                    
                         PigeonPacket toSend = ProcessPacket(clientPigeonPacket,clientIter.first->first);
 
+                        //Send file to specific client
                         if(toSend.HEADER.OPCODE == ACK_MEDIA_DOWNLOAD){
                                                          
                             logger->log(INFO,"SENDING FILE TO " + clientIter.first->second->username);
@@ -206,6 +209,7 @@ void PigeonServer::Run()
 
                             continue;
                         }
+                        
 
                         if(toSend.HEADER.OPCODE == PRESENCE_UPDATE){
                             this->NotifyNewPresence();
@@ -245,7 +249,7 @@ void PigeonServer::Run()
 /**
  * @brief Serializes a PigeonPacket object. (From PigeonPacket to uchar vector)
  * @param packet The PigeonPacket to serialize.
- * @return The serialized packet as a vector of unsigned characters.
+ * @return The serialized packet as a vector of bytes.
  */
 std::vector<unsigned char> PigeonServer::SerializePacket(const PigeonPacket &packet)
 {
@@ -384,7 +388,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                         exists = true;
                 }
 
-                // On connection, status will be Online by default.
+                // On connection, status will be Online by default, if user does not specify it.
                 if (!exists)
                 {
                     it->second->username = recv.HEADER.username;
@@ -401,7 +405,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
                     {
                         it->second->status = DND;
                     }
-
+                    
                     it->second->hasLogged = true;
                 }
                 else
