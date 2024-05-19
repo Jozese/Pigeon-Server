@@ -574,7 +574,7 @@ PigeonPacket PigeonServer::ProcessPacket(PigeonPacket &recv, int clientFD)
             }
 
 
-            if (std::time(0) - it->second->logTimestamp < 15)
+            if (std::time(0) - it->second->logTimestamp < m_data->GetData()["ratelimit"].asInt())
             {
                 newPacket = BuildPacket(RATE_LIMITED, recv.HEADER.username, {});
 

@@ -64,7 +64,7 @@ struct Client
 
 /**
  * @class PigeonServer
- * @brief A Server based on the Pigeon Protocol
+ * @brief A Server based on the Pigeon Protocol on top of a TCP/TLS server
  */
 
 class PigeonServer : public TcpServer
