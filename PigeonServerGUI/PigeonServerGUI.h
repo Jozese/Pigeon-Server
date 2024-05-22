@@ -1,3 +1,6 @@
+/*
+NOT USED THIS WAS FOR THE OLD UI NOW THERE IS NO UI
+*/
 #pragma once
 
 #include "../PigeonServer.h"
